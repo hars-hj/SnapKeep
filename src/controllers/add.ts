@@ -1,23 +1,47 @@
 import { promises as fs } from "fs";
-import path from 'path';
+import path from "path";
 import type { ArgumentsCamelCase } from "yargs";
 
-type AddArgs = { files: string };
+type AddArgs = {
+    files: string;
+};
 
-const addRepo = async (argv: ArgumentsCamelCase<AddArgs>)=>{
-    const filePath = argv.files;
-   const repoPath = path.resolve(process.cwd(),".myGit");
-   const stagingPath = path.join(repoPath,"staging");
- // console.log(filePath);
-   try{
-      await fs.mkdir(stagingPath,{recursive:true});
-      const fileName:string = path.basename(filePath);
-      await fs.copyFile(filePath,path.join(stagingPath,fileName));
-      console.log(`file ${fileName} will be added to the staging area`);
-    
-   }catch(err){
-    console.error("error adding file: ",err);
-   }
-}
+const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
+    const sourcePath = path.resolve(argv.files);
 
-export {addRepo};
+    const repoPath = path.resolve(process.cwd(), ".myGit");
+    const stagingPath = path.join(repoPath, "staging");
+
+    try {
+        await fs.mkdir(stagingPath, { recursive: true });
+
+        const stats = await fs.stat(sourcePath);
+
+        const name = path.basename(sourcePath);
+        const destination = path.join(stagingPath, name);
+
+        if (stats.isFile()) {
+            await fs.copyFile(sourcePath, destination);
+
+            console.log(
+                `file ${name} added to the staging area`
+            );
+        } else if (stats.isDirectory()) {
+            await fs.cp(sourcePath, destination, {
+                recursive: true
+            });
+
+            console.log(
+                `directory ${name} added to the staging area`
+            );
+        } else {
+            console.log(
+                `${name} is neither a file nor a directory`
+            );
+        }
+    } catch (err) {
+        console.error("error adding item:", err);
+    }
+};
+
+export { addRepo };
