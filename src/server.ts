@@ -20,9 +20,10 @@ import { pushRepo } from "./controllers/push.js";
 import { revert } from "./controllers/revert.js";
 import bodyParser from "body-parser";
 import mainRouter from "./routes/main.router.js";
-
+import { getLogs } from "./controllers/log.js";
 dotenv.config({ quiet: true });
 
+getLogs();
 
 yargs(hideBin(process.argv))
     .command('start', 'start the server', {}, startServer) 
@@ -54,6 +55,7 @@ yargs(hideBin(process.argv))
             revert(argv.commitID);   
         }
         )
+        .command('logs','get commit logs',{},getLogs)
     .demandCommand(1, 'You need to specify a command')
     .help().argv;
     
