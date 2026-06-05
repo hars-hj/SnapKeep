@@ -6,9 +6,31 @@ type AddArgs = {
     files: string;
 };
 
-const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
-    const sourcePath = path.resolve(argv.files);
+const ignoredFiles = new Set<string>();
+///f unction to avoid addding the filesthat are preent in gitignore
+const getMyGitIgnoreFiles = async()=>{
+    const content = await fs.readFile(".mygitignore", "utf-8");
+   ignoredFiles.clear();
+   ignoredFiles.add(".myGit");
+   ignoredFiles.add(".mygitignore");
+    content
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .forEach(line => ignoredFiles.add(line));
 
+}
+
+const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
+    
+    if(argv.files === "."){
+        argv.files = process.cwd();
+    } 
+    await getMyGitIgnoreFiles();
+    const sourcePath = path.resolve(argv.files);
+   
+
+   
     const repoPath = path.resolve(process.cwd(), ".myGit");
     const stagingPath = path.join(repoPath, "staging");
 
@@ -28,7 +50,12 @@ const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
             );
         } else if (stats.isDirectory()) {
             await fs.cp(sourcePath, destination, {
-                recursive: true
+                recursive: true,
+                filter: (src) => {         /// this filter is used to avoid adding the files that are present in the gitignore
+                    const name = path.basename(src);
+
+                     return !ignoredFiles.has(name);
+                }
             });
 
             console.log(

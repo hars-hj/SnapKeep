@@ -51,9 +51,10 @@ const pushRepo = async() =>{
         const commitDirs = await fs.readdir(commitsPath);
 
         for(const commitDir of commitDirs){
-            // skip if alerady commited
 
+            // skip if alerady commited
             if (pushedCommits.includes(commitDir)) {
+               
                     continue;
                 } 
 

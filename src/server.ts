@@ -51,7 +51,7 @@ yargs(hideBin(process.argv))
             })
         },
         (argv: any) => {
-            revert(argv.commitID);   // <-- THIS was missing
+            revert(argv.commitID);   
         }
         )
     .demandCommand(1, 'You need to specify a command')
