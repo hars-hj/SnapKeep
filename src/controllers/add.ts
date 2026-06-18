@@ -7,7 +7,7 @@ type AddArgs = {
 };
 
 const ignoredFiles = new Set<string>();
-///f unction to avoid addding the filesthat are preent in gitignore
+///f unction to avoid addding the files that are present in gitignore
 const getMyGitIgnoreFiles = async()=>{
     const content = await fs.readFile(".mygitignore", "utf-8");
    ignoredFiles.clear();

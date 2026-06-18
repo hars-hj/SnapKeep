@@ -21,6 +21,7 @@ import { revert } from "./controllers/revert.js";
 import bodyParser from "body-parser";
 import mainRouter from "./routes/main.router.js";
 import { getLogs } from "./controllers/log.js";
+import { loginUser } from "./controllers/login.js";
 dotenv.config({ quiet: true });
 
 getLogs();
@@ -56,6 +57,7 @@ yargs(hideBin(process.argv))
         }
         )
         .command('logs','get commit logs',{},getLogs)
+        .command('login', 'login to myGit', {}, loginUser)
     .demandCommand(1, 'You need to specify a command')
     .help().argv;
     
