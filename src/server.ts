@@ -24,7 +24,7 @@ import { getLogs } from "./controllers/log.js";
 import { loginUser } from "./controllers/login.js";
 dotenv.config({ quiet: true });
 
-getLogs();
+
 
 yargs(hideBin(process.argv))
     .command('start', 'start the server', {}, startServer) 

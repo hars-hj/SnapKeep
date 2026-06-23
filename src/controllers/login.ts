@@ -1,7 +1,7 @@
 import * as readline from 'readline';
 import { saveGlobalConfig } from '../utils/globalConfig.js';
 
-const SERVER_URL = 'https://your-deployed-server.railway.app';
+const SERVER_URL = 'http://localhost:3000';
 
 export async function loginUser() {
   const rl = readline.createInterface({
@@ -16,7 +16,7 @@ export async function loginUser() {
   rl.close();
 
   // Step 1: Try login first
-  const loginRes = await fetch(`${SERVER_URL}/auth/login`, {
+  const loginRes = await fetch(`http://localhost:3000/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password })
@@ -40,7 +40,7 @@ export async function loginUser() {
   if (loginData.message === 'User not found') {
     console.log('No account found. Creating one for you...');
 
-    const registerRes = await fetch(`${SERVER_URL}/auth/register`, {
+    const registerRes = await fetch(`http://localhost:3000/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })

@@ -1,84 +1,100 @@
 import { promises as fs } from "fs";
-import path from 'path';
-import {S3 , S3_BUCKET} from '../config/AwsConfig.js';
+import path from "path";
+import axios from "axios";
+import FormData from "form-data";
+import JSZip from "jszip"; // Import JSZip
+import {readGlobalConfig} from "../utils/globalConfig.js";
 
-//function to upload directory to s3 bucket recursively
-async function uploadDirectory(
-    localDir: string,
-    s3Prefix: string
-) {
-    const entries = await fs.readdir(localDir, {
-        withFileTypes: true
-    });
+ 
 
-    for (const entry of entries) {
-        const fullPath = path.join(localDir, entry.name);
 
-        if (entry.isDirectory()) {
-            await uploadDirectory(
-                fullPath,
-                `${s3Prefix}/${entry.name}`
-            );
-        } else {
-            const fileContent = await fs.readFile(fullPath);
+async function collectFiles(
+  dir: string,
+  baseDir: string
+): Promise<{ filePath: string; fullPath: string }[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files: { filePath: string; fullPath: string }[] = [];
 
-            await S3.upload({
-                Bucket: S3_BUCKET,
-                Key: `${s3Prefix}/${entry.name}`,
-                Body: fileContent
-            }).promise();
-        }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.relative(baseDir, fullPath);
+
+    if (entry.isDirectory()) {
+      const nested = await collectFiles(fullPath, baseDir);
+      files.push(...nested);
+    } else {
+      files.push({ filePath: relativePath, fullPath });
     }
+  }
+
+  return files;
 }
 
-const pushRepo = async() =>{
-    const repoPath = path.resolve(process.cwd(),'.myGit');
-    const commitsPath = path.join(repoPath,'commits');
+const pushRepo = async () => {
+  const repoPath = path.resolve(process.cwd(), ".myGit");
+  const commitsPath = path.join(repoPath, "commits");
 
-    try{
-        const pushedPath = path.join(repoPath, "pushed.json");
+  const config = await readGlobalConfig();
+  if (!config) {
+    console.error("User not logged in. Please login first.");
+    return;
+  }
 
-        let pushedCommits: string[] = [];
-
-        try {
-            // list of all the already pushed commits
-            const raw = await fs.readFile(pushedPath, "utf-8");
-            pushedCommits = JSON.parse(raw);
-        } catch {
-            pushedCommits = [];
-        }
-
-        const commitDirs = await fs.readdir(commitsPath);
-
-        for(const commitDir of commitDirs){
-
-            // skip if alerady commited
-            if (pushedCommits.includes(commitDir)) {
-               
-                    continue;
-                } 
-
-                const commitPath = path.join(commitsPath, commitDir);
-              // upload the uncommited dirs
-                await uploadDirectory(
-                    commitPath,
-                    `commits/${commitDir}`
-                );
-            
-            // Mark as pushed
-            pushedCommits.push(commitDir);
-
-            await fs.writeFile(
-                pushedPath,
-                JSON.stringify(pushedCommits, null, 2)
-            );
-        }
-        
-        console.log('all commits pushed to s3');
-
-    }catch(err){
-        console.error("Error pushing in S3: ",err);
+  const { username } = config;
+ 
+  const server_url = config.serverUrl ||  "http://localhost:3000";
+  
+  try {
+    const pushedPath = path.join(repoPath, "pushed.json");
+    let pushedCommits: string[] = [];
+    try {
+      const raw = await fs.readFile(pushedPath, "utf-8");
+      pushedCommits = JSON.parse(raw);
+    } catch {
+      pushedCommits = [];
     }
 
-}
-export {pushRepo};
+    // This dynamically reads all your folder names as commit IDs
+    const commitDirs = await fs.readdir(commitsPath);
+
+    for (const commitDir of commitDirs) {
+      if (pushedCommits.includes(commitDir)) continue;
+
+      const commitPath = path.join(commitsPath, commitDir);
+      const files = await collectFiles(commitPath, commitPath);
+      const zip = new JSZip();
+
+      for (const { filePath, fullPath } of files) {
+        const content = await fs.readFile(fullPath);
+        const normalizedPath = filePath.replace(/\\/g, "/");
+        zip.file(normalizedPath, content);
+      }
+
+      const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+
+      const form = new FormData();
+      form.append("username", username);
+      form.append("commitId", commitDir); // The folder name acts as the ID
+
+      form.append("file", zipBuffer, {
+        filename: `${commitDir}.zip`,
+        contentType: "application/zip",
+      });
+
+      await axios.post(`${server_url}/push`, form, {
+        headers: form.getHeaders(),
+      });
+
+      console.log(`pushed commit zip: ${commitDir}`);
+
+      pushedCommits.push(commitDir);
+      await fs.writeFile(pushedPath, JSON.stringify(pushedCommits, null, 2));
+    }
+
+    console.log("all commits pushed to server");
+  } catch (err) {
+    console.error("Error pushing to server: ", err);
+  }
+};
+
+export { pushRepo };
