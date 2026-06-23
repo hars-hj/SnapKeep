@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import axios from "axios";
 import FormData from "form-data";
-import JSZip from "jszip"; // Import JSZip
+import JSZip from "jszip"; 
 import {readGlobalConfig} from "../utils/globalConfig.js";
 
  
@@ -39,9 +39,8 @@ const pushRepo = async () => {
     console.error("User not logged in. Please login first.");
     return;
   }
-
-  const { username } = config;
- 
+   const username = config.username;
+  
   const server_url = config.serverUrl ||  "http://localhost:3000";
   
   try {
@@ -74,6 +73,7 @@ const pushRepo = async () => {
 
       const form = new FormData();
       form.append("username", username);
+     
       form.append("commitId", commitDir); // The folder name acts as the ID
 
       form.append("file", zipBuffer, {

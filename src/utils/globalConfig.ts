@@ -5,6 +5,7 @@
      const CONFIG_PATH = path.join(os.homedir(), '.mygit', 'config.json');
 
      export async function saveGlobalConfig(data: object) {
+     
        await fs.mkdir(path.dirname(CONFIG_PATH), { recursive: true });
        await fs.writeFile(CONFIG_PATH, JSON.stringify(data, null, 2));
      }

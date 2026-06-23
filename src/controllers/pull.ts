@@ -1,61 +1,53 @@
 import { promises as fs } from "fs";
 import path from 'path';
-import { S3, S3_BUCKET } from '../config/AwsConfig.js';
+import axios from 'axios';
+import JSZip from 'jszip';
 
-// Pulls all commits from S3 and recreates them locally
+// URL of your central server (Adjust this to match your backend port/route)
+const SERVER_URL = "http://localhost:3000/pull"; 
+
 const pullRepo = async () => {
-
   const repoPath = path.resolve(process.cwd(), '.myGit');
-  
- 
-  const commitspath = path.join(repoPath, "commits");
 
   try {
-    // List all objects in S3 under the "commits/" prefix
-    const data = await S3.listObjectsV2({
-      Bucket: S3_BUCKET,
-      Prefix: 'commits/'
-    }).promise();
+    console.log("Connecting to server to pull repository...");
 
-    // All files returned from S3
-    const objects: any = data.Contents;
+    // 1. Ensure the .myGit directory exists locally
+    await fs.mkdir(repoPath, { recursive: true });
 
+    // 2. Request the zipped commits from your server as an arraybuffer
+    const response = await axios({
+      method: 'get',
+      url: SERVER_URL,
+      responseType: 'arraybuffer', 
+    });
 
-    for (const object of objects) {
-      
-      // Full S3 key (e.g. commits/abc123/file.txt)
-      const key = object.Key;
+    console.log("Download complete. Extracting repository data...");
 
-      // Directory part of the key
-      const fulladd = path.dirname(key);
+    // 3. Load the zip file data into JSZip
+    const zip = new JSZip();
+    const loadedZip = await zip.loadAsync(response.data);
 
-      // Extract commit id from path
-      const last = fulladd.split("/").pop();
-      if (!last) continue;
+    // 4. Iterate over every file and folder inside the zip file
+    for (const [relativePath, file] of Object.entries(loadedZip.files)) {
+      const absolutePath = path.join(repoPath, relativePath);
 
-      const commitDir = path.join(commitspath, last);
-
-      // Create commit directory if it doesn't exist
-      await fs.mkdir(commitDir, { recursive: true });
-
-      // Params to fetch the file from S3
-      const params = {
-        Bucket: S3_BUCKET,
-        Key: key
-      };
-
-      // Download file content from S3
-      const fileContent = await S3.getObject(params).promise();
-      const body = fileContent.Body!.toString();
-
-      // Write file to local repo path
-      await fs.writeFile(path.join(repoPath, key), body);
+      if (file.dir) {
+        // If it's a directory structure, recreate it locally
+        await fs.mkdir(absolutePath, { recursive: true });
+      } else {
+        // Ensure the parent directory for the file exists before writing
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        
+        // Get the file content as a Node.js Buffer and write it
+        const contentBuffer = await file.async('nodebuffer');
+        await fs.writeFile(absolutePath, contentBuffer);
+      }
     }
 
-    // Success message after all files are pulled
-    console.log("All commits pulled successfully.");
-  } catch (err) {
-    console.error("Error pulling from S3 bucket: ", err);
+    console.log("All commits pulled and extracted successfully.");
+  } catch (err: any) {
+    console.error("Error pulling from server:", err.message || err);
   }
 };
 

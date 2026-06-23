@@ -25,7 +25,7 @@ export async function loginUser() {
   const loginData = await loginRes.json();
 
   // Step 2: If login succeeded, save and done
-  if (loginRes.ok) {
+  if (loginData.ok===true) {
     await saveGlobalConfig({
       username: loginData.username,
       userId: loginData.userId,
