@@ -2,13 +2,63 @@ import { promises as fs } from "fs";
 import path from 'path';
 import axios from 'axios';
 import JSZip from 'jszip';
+import { readGlobalConfig } from "../utils/globalConfig.js";
 
-// URL of your central server (Adjust this to match your backend port/route)
+
 const SERVER_URL = "http://localhost:3000/pull"; 
+
+
+
+const enforcePull = async(commitID:string,username : string)=>{
+
+      const repoPath = path.resolve(process.cwd(),'.myGit');
+     const commitsPath = path.join(repoPath,`${username}`);
+
+     try {
+      const commitDir = path.join(commitsPath, commitID);
+      const parentDir = path.resolve(repoPath, "..");
+
+      await fs.cp(commitDir, parentDir, {
+          recursive: true,
+          force: true,
+          filter: (src:any) =>
+              path.basename(src) !== "commit.json"
+      });
+
+  }catch(err){
+        console.error("Unable to pull changes: ",err);
+     }
+}
+
+/// read all the commit ids.
+const getCommitIds = (loadedZip:any) => {
+  const commitIds = new Set();
+
+  for (const relativePath of Object.keys(loadedZip.files)) {
+    const parts = relativePath.split('/');
+    
+    // Ensure the path has at least a username and a commitId segment
+    if (parts.length >= 2) {
+      const commitId = parts[1];
+      if (commitId) {
+        commitIds.add(commitId);
+      }
+    }
+  }
+
+  return Array.from(commitIds);
+};
 
 const pullRepo = async () => {
   const repoPath = path.resolve(process.cwd(), '.myGit');
 
+  const config = await readGlobalConfig();
+  if (!config) {
+    console.error("User not logged in. Please login first.");
+    return;
+  }
+  const username = config.username;
+ console.log(username);
   try {
     console.log("Connecting to server to pull repository...");
 
@@ -17,6 +67,7 @@ const pullRepo = async () => {
 
     // 2. Request the zipped commits from your server as an arraybuffer
     const response = await axios({
+      params: { username:username }, 
       method: 'get',
       url: SERVER_URL,
       responseType: 'arraybuffer', 
@@ -43,6 +94,11 @@ const pullRepo = async () => {
         const contentBuffer = await file.async('nodebuffer');
         await fs.writeFile(absolutePath, contentBuffer);
       }
+    }
+
+    const commits = getCommitIds(loadedZip);
+    for(const commitid of commits){
+     await enforcePull(commitid,username);
     }
 
     console.log("All commits pulled and extracted successfully.");

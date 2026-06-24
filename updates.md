@@ -118,3 +118,73 @@ npm run build
 
 # 3. Mount current folder to system global pathways
 npm install -g .
+
+----------------------------------------------------------------------------------------------------------------------------------
+
+⏪ Revert Command (Restoring Workspace State)
+The revert command allows users to roll back their current working directory to the exact state of a previously recorded commit. It replaces active workspace files with historical versions from the repository's internal ledger.
+
+⚙️ How It Works
+Commit Isolation: Targets the specific historical snapshot directory located within .myGit/commits/<commitID>.
+
+Destructive Workspace Overwrite: Uses a recursive copy operation (fs.cp with { force: true }) to violently overwrite the active working directory with the chosen commit's files, effectively rolling back uncommitted or subsequent changes.
+
+Metadata Filtering: Implements a strict exclusion filter to prevent the internal lifecycle file (commit.json) from leaking out of the .myGit store and cluttering the user's root workspace.
+
+🔄 Logic Flow
+[.myGit/commits/<commitID>] ──> [Filter: Ignore "commit.json"] ──> [Recursive Copy / Force Overwrite] ──> [Root Working Directory]
+
+----------------------------------------------------------------------------------------------------------------------------------
+
+The login command manages user authentication for the custom VCS CLI. It provides a seamless onboarding experience by checking for an existing account and automatically creating one if the user is new.
+
+⚙️ How It Works
+Interactive CLI Input: Securely captures the user's username and password directly via the terminal interface using Node.js readline.
+
+Smart Identity Resolution: 1. It first attempts to authenticate against the /auth/login endpoint.
+2. If the server responds with a "User not found" message, the command seamlessly pivots to trigger an automatic account creation request via /auth/register.
+
+Global State Persistence: Upon successful authentication (either via direct login or auto-registration), it extracts the session token and user metadata, saving them locally into a global configuration file (globalConfig.js). This token is reused to authorize future push and pull operations.
+
+🔄 Logic Flow
+[CLI Input] ──> [Try /auth/login] ──> Succeeded? ──(Yes)──> [Save Config & Token]
+                           │
+                          (No, "User not found")
+                           │
+                           ▼
+                  [Try /auth/register] ──> Success? ──(Yes)──> [Save Config & Token]
+
+
+----------------------------------------------------------------------------------------------------------------------------------                  
+
+📤 Push Command (Publishing Local Changes)
+The push command automates the process of publishing your local repository history to the remote server, ensuring that new commits are safely backed up and shared.
+
+⚙️ How It Works
+Delta Tracking: Scans the local .myGit/commits/ directory and references a pushed.json manifest file to identify only the new, unpushed commits, preventing redundant network transfers.
+
+On-the-Fly Compression: Gathers all files associated with a specific commit and uses JSZip to pack them into a single ZIP archive buffer in memory, normalizing Windows/Linux file paths.
+
+Multipart Transport: Packages the compressed ZIP buffer alongside user metadata (username, commitId) into a multipart/form-data payload and streams it to the server using Axios.
+
+State Finalization: Upon a successful 200 OK server response, it updates the local pushed.json file to mark the commit as successfully synced.
+
+🔄 Data Flow
+[Local .myGit] ──> [Filter Unpushed] ──> [Zip Files in RAM] ──> [Axios POST] ──> [Server
+
+----------------------------------------------------------------------------------------------------------------------------------
+
+Pull Command (Syncing Remote Changes)
+The pull command reverses the push pipeline, allowing users to fetch and download repository history or specific commits from the remote server to sync their local workspace.
+
+⚙️ How It Works
+Remote Fetching: Sends a request to the server to download the latest repository state or a specific commitId as a compressed ZIP archive.
+
+In-Memory Extraction: Receives the raw binary stream and uses JSZip to unpack the file hierarchy directly in memory, ensuring rapid processing without generating intermediate temp files.
+
+Workspace Restoration: Recursively writes the extracted files back into the local directory, accurately rebuilding the repository structure with normalized cross-platform file paths.
+
+Manifest Synchronization: Updates local state tracking files to reflect the newly pulled commits, keeping the local client perfectly in sync with the remote server.
+
+🔄 Data Flow
+[Server Storage] ──> [Stream ZIP Archive] ──> [Axios GET] ──> [Memory Unpack] ──> [Update
