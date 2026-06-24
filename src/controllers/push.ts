@@ -4,7 +4,7 @@ import axios from "axios";
 import FormData from "form-data";
 import JSZip from "jszip"; 
 import {readGlobalConfig} from "../utils/globalConfig.js";
-
+import {readRepoConfig} from "../utils/readConfig.json.js"
  
 
 
@@ -70,10 +70,11 @@ const pushRepo = async () => {
       }
 
       const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-
+      const repoConfig = await readRepoConfig();
+      const reponame = repoConfig?.name;
       const form = new FormData();
       form.append("username", username);
-     
+      form.append("reponame",reponame)
       form.append("commitId", commitDir); // The folder name acts as the ID
 
       form.append("file", zipBuffer, {

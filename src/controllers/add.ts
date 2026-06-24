@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { ArgumentsCamelCase } from "yargs";
-
+import { checkLoggedIn } from "./checkloggedin.js";
 type AddArgs = {
     files: string;
 };
@@ -22,7 +22,7 @@ const getMyGitIgnoreFiles = async()=>{
 }
 
 const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
-    
+    checkLoggedIn();
     if(argv.files === "."){
         argv.files = process.cwd();
     } 

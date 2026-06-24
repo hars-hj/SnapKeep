@@ -30,7 +30,8 @@ export async function loginUser() {
       username: loginData.username,
       userId: loginData.userId,
       token: loginData.token,
-      serverUrl: SERVER_URL
+      serverUrl: SERVER_URL,
+     
     });
     console.log(`Logged in as ${username}`);
     return;
@@ -57,7 +58,8 @@ export async function loginUser() {
       username: registerData.username,
       userId: registerData.userId,
       token: registerData.token,
-      serverUrl: SERVER_URL
+      serverUrl: SERVER_URL,
+      
     });
     console.log(`Account created and logged in as ${username}`);
     return;

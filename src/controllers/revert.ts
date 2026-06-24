@@ -1,12 +1,13 @@
 import path from 'path';
 import { promises as fs } from "fs";
 import {promisify} from 'util';
-
+import { checkLoggedIn } from './checkloggedin.js';
 const readdir = promisify(fs.readdir);
 const copyFile = promisify(fs.copyFile);
 
 
 const revert = async(commitID:string)=>{
+    checkLoggedIn();
       const repoPath = path.resolve(process.cwd(),'.myGit');
      const commitsPath = path.join(repoPath,'commits');
 

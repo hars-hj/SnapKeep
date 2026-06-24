@@ -3,19 +3,35 @@ import path from 'path';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { readGlobalConfig } from "../utils/globalConfig.js";
-
+import {readRepoConfig} from "../utils/readConfig.json.js"
 
 const SERVER_URL = "http://localhost:3000/pull"; 
 
 
 
-const enforcePull = async(commitID:string,username : string)=>{
+const enforcePull = async(commitID:string,username : string,loadedZip:any)=>{
 
       const repoPath = path.resolve(process.cwd(),'.myGit');
      const commitsPath = path.join(repoPath,`${username}`);
 
+
      try {
-      const commitDir = path.join(commitsPath, commitID);
+            let commonSegment = "";
+
+      for (const relativePath of Object.keys(loadedZip.files)) {
+        const parts = relativePath.split('/');
+        
+        // Ensure the path has at least 2 segments (index 0 and index 1)
+        if (parts.length >= 2) {
+          const secondPart = parts[1];
+          if (secondPart) {
+            commonSegment = secondPart;
+            break; // Stop looping immediately since we found it
+          }
+        }
+      }
+      const revertPath = path.join(commitsPath,`${commonSegment}`)
+      const commitDir = path.join(revertPath, commitID);
       const parentDir = path.resolve(repoPath, "..");
 
       await fs.cp(commitDir, parentDir, {
@@ -38,8 +54,8 @@ const getCommitIds = (loadedZip:any) => {
     const parts = relativePath.split('/');
     
     // Ensure the path has at least a username and a commitId segment
-    if (parts.length >= 2) {
-      const commitId = parts[1];
+    if (parts.length >= 3) {
+      const commitId = parts[2];
       if (commitId) {
         commitIds.add(commitId);
       }
@@ -58,16 +74,19 @@ const pullRepo = async () => {
     return;
   }
   const username = config.username;
- console.log(username);
+
   try {
     console.log("Connecting to server to pull repository...");
 
     // 1. Ensure the .myGit directory exists locally
     await fs.mkdir(repoPath, { recursive: true });
-
+    const repoconfig = await readRepoConfig();
+    const reponame = repoconfig?.name;
     // 2. Request the zipped commits from your server as an arraybuffer
     const response = await axios({
-      params: { username:username }, 
+      params: { username:username,
+        reponame:reponame
+       }, 
       method: 'get',
       url: SERVER_URL,
       responseType: 'arraybuffer', 
@@ -98,7 +117,10 @@ const pullRepo = async () => {
 
     const commits = getCommitIds(loadedZip);
     for(const commitid of commits){
-     await enforcePull(commitid,username);
+      if (typeof commitid !== "string") {
+      throw new Error(`Invalid commit id: ${String(commitid)}`);
+     }
+     await enforcePull(commitid,username,loadedZip);
     }
 
     console.log("All commits pulled and extracted successfully.");

@@ -2,12 +2,13 @@ import { promises as fs } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import type { ArgumentsCamelCase } from "yargs";
-
+import { checkLoggedIn } from "./checkloggedin.js";
 type AddArgs = {
     message: string;
 };
 
 const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
+    checkLoggedIn();
     const message = argv.message;
 
     const repoPath = path.resolve(process.cwd(), ".myGit");
