@@ -8,18 +8,22 @@ type AddArgs = {
 
 const ignoredFiles = new Set<string>();
 ///f unction to avoid addding the files that are present in gitignore
-const getMyGitIgnoreFiles = async()=>{
-    const content = await fs.readFile(".mygitignore", "utf-8");
-   ignoredFiles.clear();
-   ignoredFiles.add(".myGit");
-   ignoredFiles.add(".mygitignore");
-    content
-        .split("\n")
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .forEach(line => ignoredFiles.add(line));
+const getMyGitIgnoreFiles = async () => {
+    ignoredFiles.clear();
+    ignoredFiles.add(".snapkeep");
+    ignoredFiles.add(".snapkeepignore");
 
-}
+    try {
+        const content = await fs.readFile(".snapkeepignore", "utf-8");
+        content
+            .split("\n")
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .forEach(line => ignoredFiles.add(line));
+    } catch (err: any) {
+        if (err.code !== "ENOENT") throw err; // ignore missing file, rethrow anything else
+    }
+};
 
 const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     checkLoggedIn();
@@ -31,7 +35,7 @@ const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
    
 
    
-    const repoPath = path.resolve(process.cwd(), ".myGit");
+    const repoPath = path.resolve(process.cwd(), ".snapkeep");
     const stagingPath = path.join(repoPath, "staging");
 
     try {

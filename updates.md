@@ -188,3 +188,6 @@ Manifest Synchronization: Updates local state tracking files to reflect the newl
 
 🔄 Data Flow
 [Server Storage] ──> [Stream ZIP Archive] ──> [Axios GET] ──> [Memory Unpack] ──> [Update
+
+
+THE FILES ARE STORED IN THE S3 AS USERNAME/REPONAME/commitid

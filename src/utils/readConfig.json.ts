@@ -12,14 +12,14 @@ interface RepoConfig {
 
 export async function readRepoConfig(): Promise<RepoConfig | null> {
   try {
-    const configPath = path.join(process.cwd(), '.myGit', 'config.json');
+    const configPath = path.join(process.cwd(), '.snapkeep', 'config.json');
     const fileContent = await fs.readFile(configPath, 'utf-8');
     
     return JSON.parse(fileContent) as RepoConfig;
   } catch (error: any) {
     // ENOENT means the file or directory doesn't exist
     if (error.code === 'ENOENT') {
-      console.error("Error: Not a mygit repository. Please run 'mygit init' first.");
+      console.error("Error: Not a snapkeep repository. Please run 'snapkeep init' first.");
     } else {
       console.error("Failed to read repository configuration:", error.message);
     }

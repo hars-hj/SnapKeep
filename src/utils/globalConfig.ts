@@ -2,7 +2,7 @@
      import path from 'path';
      import { promises as fs } from 'fs';
 
-     const CONFIG_PATH = path.join(os.homedir(), '.mygit', 'config.json');
+     const CONFIG_PATH = path.join(os.homedir(), '.snapkeep', 'config.json');
 
      export async function saveGlobalConfig(data: object) {
      

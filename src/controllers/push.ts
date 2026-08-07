@@ -31,7 +31,7 @@ async function collectFiles(
 }
 
 const pushRepo = async () => {
-  const repoPath = path.resolve(process.cwd(), ".myGit");
+  const repoPath = path.resolve(process.cwd(), ".snapkeep");
   const commitsPath = path.join(repoPath, "commits");
 
   const config = await readGlobalConfig();

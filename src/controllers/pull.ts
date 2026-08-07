@@ -11,7 +11,7 @@ const SERVER_URL = "http://localhost:3000/pull";
 
 const enforcePull = async(commitID:string,username : string,loadedZip:any)=>{
 
-      const repoPath = path.resolve(process.cwd(),'.myGit');
+      const repoPath = path.resolve(process.cwd(),'.snapkeep');
      const commitsPath = path.join(repoPath,`${username}`);
 
 
@@ -66,7 +66,7 @@ const getCommitIds = (loadedZip:any) => {
 };
 
 const pullRepo = async () => {
-  const repoPath = path.resolve(process.cwd(), '.myGit');
+  const repoPath = path.resolve(process.cwd(), '.snapkeep');
 
   const config = await readGlobalConfig();
   if (!config) {
@@ -78,7 +78,7 @@ const pullRepo = async () => {
   try {
     console.log("Connecting to server to pull repository...");
 
-    // 1. Ensure the .myGit directory exists locally
+    // 1. Ensure the .snapkeep directory exists locally
     await fs.mkdir(repoPath, { recursive: true });
     const repoconfig = await readRepoConfig();
     const reponame = repoconfig?.name;

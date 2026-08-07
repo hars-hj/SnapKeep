@@ -3,7 +3,7 @@ import path from 'path';
 import { checkLoggedIn } from "./checkloggedin.js";
 const initRepo = async() =>{
   checkLoggedIn();
-    const repoPath = path.resolve(process.cwd(),".myGit");
+    const repoPath = path.resolve(process.cwd(),".snapkeep");
     const commitsPath = path.join(repoPath,"commits");
     const repoName = path.basename(process.cwd());
 

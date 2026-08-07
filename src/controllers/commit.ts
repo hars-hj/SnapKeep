@@ -11,7 +11,7 @@ const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     checkLoggedIn();
     const message = argv.message;
 
-    const repoPath = path.resolve(process.cwd(), ".myGit");
+    const repoPath = path.resolve(process.cwd(), ".snapkeep");
     const stagedPath = path.join(repoPath, "staging");
     const commitPath = path.join(repoPath, "commits");
 
