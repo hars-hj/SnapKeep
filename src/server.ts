@@ -49,7 +49,7 @@ yargs(hideBin(process.argv))
         }
         )
         .command('logs','get commit logs',{},getLogs)
-        .command('login', 'login to myGit', {}, loginUser)
+        .command('login', 'login to snapkeep', {}, loginUser)
     .demandCommand(1, 'You need to specify a command')
     .help().argv;
     

@@ -1,9 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { ArgumentsCamelCase } from "yargs";
+import { checkRepoInitialized } from "./checkrepoinitialized.js";
 
 
 export const getLogs = async()=>{
+    if (!(await checkRepoInitialized())) return;
     const repoPath = path.resolve(process.cwd(),".snapkeep");
     const commitsPath = path.join(repoPath,"commits");
 

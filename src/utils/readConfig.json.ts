@@ -1,12 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-interface RepoConfig {
+export interface RepoConfig {
   name: string;
 }
 
 /**
- * Reads and parses the repository configuration from .myGit/config.json
+ * Reads and parses the repository configuration from .snapkeep/config.json
  * Returns the config object, or null if the repository hasn't been initialized.
  */
 

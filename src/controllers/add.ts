@@ -2,13 +2,14 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { ArgumentsCamelCase } from "yargs";
 import { checkLoggedIn } from "./checkloggedin.js";
+import { checkRepoInitialized } from "./checkrepoinitialized.js";
 type AddArgs = {
     files: string;
 };
 
 const ignoredFiles = new Set<string>();
 ///f unction to avoid addding the files that are present in gitignore
-const getMyGitIgnoreFiles = async () => {
+const getSnapkeepIgnoreFiles = async () => {
     ignoredFiles.clear();
     ignoredFiles.add(".snapkeep");
     ignoredFiles.add(".snapkeepignore");
@@ -27,10 +28,11 @@ const getMyGitIgnoreFiles = async () => {
 
 const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     checkLoggedIn();
+    if (!(await checkRepoInitialized())) return;
     if(argv.files === "."){
         argv.files = process.cwd();
     } 
-    await getMyGitIgnoreFiles();
+    await getSnapkeepIgnoreFiles();
     const sourcePath = path.resolve(argv.files);
    
 

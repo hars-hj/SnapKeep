@@ -91,12 +91,12 @@ When you type a command globally into your system, a clear chain of events handl
 
 
 
-1. **Terminal Command Execution:** You open your terminal in any directory (`C:\some-project`) and type `mygit init`.
-2. **System Environment Lookup:** The OS looks inside your system's global `PATH` variable to find an executable named `mygit`.
+1. **Terminal Command Execution:** You open your terminal in any directory (`C:\some-project`) and type `snapkeep init`.
+2. **System Environment Lookup:** The OS looks inside your system's global `PATH` variable to find an executable named `snapkeep`.
 3. **The Global Pointer Link:** It finds a shortcut (symlink) created inside your global npm directory via `npm install -g .`. This shortcut acts as an alias pointing directly to your project’s compiled build folder (`dist/server.js`).
 4. **The Runtime Handshake (Shebang):** Node runs your code because of the shebang entry `#!/usr/bin/env node` added at line 1.
 5. **Contextual Evaluation (`process.cwd()` vs `__dirname`):** * `__dirname` is hard-coded to your actual project source directory.
-   * `process.cwd()` dynamically evaluates to where the developer is standing (`C:\some-project`). By relying on `process.cwd()`, your repository initializes the `.mygit` folder precisely where it's executed.
+   * `process.cwd()` dynamically evaluates to where the developer is standing (`C:\some-project`). By relying on `process.cwd()`, your repository initializes the `.snapkeep` folder precisely where it's executed.
 
 #### 2. Summary Checklist of Changes Implemented
 
@@ -125,14 +125,14 @@ npm install -g .
 The revert command allows users to roll back their current working directory to the exact state of a previously recorded commit. It replaces active workspace files with historical versions from the repository's internal ledger.
 
 ⚙️ How It Works
-Commit Isolation: Targets the specific historical snapshot directory located within .myGit/commits/<commitID>.
+Commit Isolation: Targets the specific historical snapshot directory located within .snapkeep/commits/<commitID>.
 
 Destructive Workspace Overwrite: Uses a recursive copy operation (fs.cp with { force: true }) to violently overwrite the active working directory with the chosen commit's files, effectively rolling back uncommitted or subsequent changes.
 
-Metadata Filtering: Implements a strict exclusion filter to prevent the internal lifecycle file (commit.json) from leaking out of the .myGit store and cluttering the user's root workspace.
+Metadata Filtering: Implements a strict exclusion filter to prevent the internal lifecycle file (commit.json) from leaking out of the .snapkeep store and cluttering the user's root workspace.
 
 🔄 Logic Flow
-[.myGit/commits/<commitID>] ──> [Filter: Ignore "commit.json"] ──> [Recursive Copy / Force Overwrite] ──> [Root Working Directory]
+[.snapkeep/commits/<commitID>] ──> [Filter: Ignore "commit.json"] ──> [Recursive Copy / Force Overwrite] ──> [Root Working Directory]
 
 ----------------------------------------------------------------------------------------------------------------------------------
 
@@ -161,7 +161,7 @@ Global State Persistence: Upon successful authentication (either via direct logi
 The push command automates the process of publishing your local repository history to the remote server, ensuring that new commits are safely backed up and shared.
 
 ⚙️ How It Works
-Delta Tracking: Scans the local .myGit/commits/ directory and references a pushed.json manifest file to identify only the new, unpushed commits, preventing redundant network transfers.
+Delta Tracking: Scans the local .snapkeep/commits/ directory and references a pushed.json manifest file to identify only the new, unpushed commits, preventing redundant network transfers.
 
 On-the-Fly Compression: Gathers all files associated with a specific commit and uses JSZip to pack them into a single ZIP archive buffer in memory, normalizing Windows/Linux file paths.
 
@@ -170,7 +170,7 @@ Multipart Transport: Packages the compressed ZIP buffer alongside user metadata 
 State Finalization: Upon a successful 200 OK server response, it updates the local pushed.json file to mark the commit as successfully synced.
 
 🔄 Data Flow
-[Local .myGit] ──> [Filter Unpushed] ──> [Zip Files in RAM] ──> [Axios POST] ──> [Server
+[Local .snapkeep] ──> [Filter Unpushed] ──> [Zip Files in RAM] ──> [Axios POST] ──> [Server
 
 ----------------------------------------------------------------------------------------------------------------------------------
 

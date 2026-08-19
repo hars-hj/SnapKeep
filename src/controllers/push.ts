@@ -4,7 +4,7 @@ import axios from "axios";
 import FormData from "form-data";
 import JSZip from "jszip"; 
 import {readGlobalConfig} from "../utils/globalConfig.js";
-import {readRepoConfig} from "../utils/readConfig.json.js"
+import { checkRepoInitialized } from "./checkrepoinitialized.js";
  
 
 
@@ -39,7 +39,11 @@ const pushRepo = async () => {
     console.error("User not logged in. Please login first.");
     return;
   }
-   const username = config.username;
+  const repoConfig = await checkRepoInitialized();
+  if (!repoConfig) return;
+
+  const username = config.username;
+  const reponame = repoConfig.name;
   
   const server_url = config.serverUrl ||  "http://localhost:3000";
   
@@ -70,8 +74,6 @@ const pushRepo = async () => {
       }
 
       const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-      const repoConfig = await readRepoConfig();
-      const reponame = repoConfig?.name;
       const form = new FormData();
       form.append("username", username);
       form.append("reponame",reponame)

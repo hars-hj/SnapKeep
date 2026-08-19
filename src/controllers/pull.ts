@@ -3,7 +3,7 @@ import path from 'path';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { readGlobalConfig } from "../utils/globalConfig.js";
-import {readRepoConfig} from "../utils/readConfig.json.js"
+import { checkRepoInitialized } from "./checkrepoinitialized.js";
 
 const SERVER_URL = "http://localhost:3000/pull"; 
 
@@ -73,15 +73,14 @@ const pullRepo = async () => {
     console.error("User not logged in. Please login first.");
     return;
   }
+  const repoConfig = await checkRepoInitialized();
+  if (!repoConfig) return;
+
   const username = config.username;
+  const reponame = repoConfig.name;
 
   try {
     console.log("Connecting to server to pull repository...");
-
-    // 1. Ensure the .snapkeep directory exists locally
-    await fs.mkdir(repoPath, { recursive: true });
-    const repoconfig = await readRepoConfig();
-    const reponame = repoconfig?.name;
     // 2. Request the zipped commits from your server as an arraybuffer
     const response = await axios({
       params: { username:username,
