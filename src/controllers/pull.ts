@@ -9,61 +9,64 @@ const SERVER_URL = "http://localhost:3000/pull";
 
 
 
-const enforcePull = async(commitID:string,username : string,loadedZip:any)=>{
+const enforcePull = async (
+  commitID: string,
+  username: string,
+  reponame: string
+) => {
+  const repoPath = path.resolve(process.cwd(), ".snapkeep");
+  const commitDir = path.join(repoPath, username, reponame, commitID);
+  const parentDir = path.resolve(repoPath, "..");
 
-      const repoPath = path.resolve(process.cwd(),'.snapkeep');
-     const commitsPath = path.join(repoPath,`${username}`);
+  try {
+    await fs.cp(commitDir, parentDir, {
+      recursive: true,
+      force: true,
+      filter: (src) => path.basename(src) !== "commit.json",
+    });
+  } catch (err) {
+    console.error("Unable to pull changes: ", err);
+  }
+};
 
+async function getLatestCommitId(
+  username: string,
+  reponame: string
+): Promise<string | null> {
+  const commitsDir = path.join(process.cwd(), ".snapkeep", username, reponame);
 
-     try {
-            let commonSegment = "";
+  let entries;
+  try {
+    entries = await fs.readdir(commitsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
 
-      for (const relativePath of Object.keys(loadedZip.files)) {
-        const parts = relativePath.split('/');
-        
-        // Ensure the path has at least 2 segments (index 0 and index 1)
-        if (parts.length >= 2) {
-          const secondPart = parts[1];
-          if (secondPart) {
-            commonSegment = secondPart;
-            break; // Stop looping immediately since we found it
-          }
-        }
+  let latestId: string | null = null;
+  let latestTime = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    try {
+      const raw = await fs.readFile(
+        path.join(commitsDir, entry.name, "commit.json"),
+        "utf-8"
+      );
+      const { date } = JSON.parse(raw);
+      const time = new Date(date).getTime();
+
+      if (time > latestTime) {
+        latestTime = time;
+        latestId = entry.name;
       }
-      const revertPath = path.join(commitsPath,`${commonSegment}`)
-      const commitDir = path.join(revertPath, commitID);
-      const parentDir = path.resolve(repoPath, "..");
-
-      await fs.cp(commitDir, parentDir, {
-          recursive: true,
-          force: true,
-          filter: (src:any) =>
-              path.basename(src) !== "commit.json"
-      });
-
-  }catch(err){
-        console.error("Unable to pull changes: ",err);
-     }
-}
-
-/// read all the commit ids.
-const getCommitIds = (loadedZip:any) => {
-  const commitIds = new Set();
-
-  for (const relativePath of Object.keys(loadedZip.files)) {
-    const parts = relativePath.split('/');
-    
-    // Ensure the path has at least a username and a commitId segment
-    if (parts.length >= 3) {
-      const commitId = parts[2];
-      if (commitId) {
-        commitIds.add(commitId);
-      }
+    } catch {
+      // skip commits without valid commit.json
     }
   }
 
-  return Array.from(commitIds);
-};
+  return latestId;
+}
 
 const pullRepo = async () => {
   const repoPath = path.resolve(process.cwd(), '.snapkeep');
@@ -114,12 +117,9 @@ const pullRepo = async () => {
       }
     }
 
-    const commits = getCommitIds(loadedZip);
-    for(const commitid of commits){
-      if (typeof commitid !== "string") {
-      throw new Error(`Invalid commit id: ${String(commitid)}`);
-     }
-     await enforcePull(commitid,username,loadedZip);
+    const latestCommitId = await getLatestCommitId(username, reponame);
+    if (latestCommitId) {
+      await enforcePull(latestCommitId, username, reponame);
     }
 
     console.log("All commits pulled and extracted successfully.");

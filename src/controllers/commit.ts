@@ -8,6 +8,28 @@ type AddArgs = {
     message: string;
 };
 
+async function hasStagedFiles(dir: string): Promise<boolean> {
+    let entries;
+    try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (err: any) {
+        if (err.code === "ENOENT") return false;
+        throw err;
+    }
+
+    for (const entry of entries) {
+        if (entry.isFile()) return true;
+        if (
+            entry.isDirectory() &&
+            (await hasStagedFiles(path.join(dir, entry.name)))
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     checkLoggedIn();
     if (!(await checkRepoInitialized())) return;
@@ -16,6 +38,13 @@ const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     const repoPath = path.resolve(process.cwd(), ".snapkeep");
     const stagedPath = path.join(repoPath, "staging");
     const commitPath = path.join(repoPath, "commits");
+
+    if (!(await hasStagedFiles(stagedPath))) {
+        console.error(
+            "Nothing to commit. Stage files with 'snapkeep add' first."
+        );
+        return;
+    }
 
     try {
         const commitID = uuidv4();
