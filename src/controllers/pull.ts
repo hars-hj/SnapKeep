@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from 'path';
 import axios from 'axios';
 import JSZip from 'jszip';
-import { readGlobalConfig } from "../utils/globalConfig.js";
+import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
 
 const SERVER_URL = "http://localhost:3000/pull"; 
@@ -71,11 +71,7 @@ async function getLatestCommitId(
 const pullRepo = async () => {
   const repoPath = path.resolve(process.cwd(), '.snapkeep');
 
-  const config = await readGlobalConfig();
-  if (!config) {
-    console.error("User not logged in. Please login first.");
-    return;
-  }
+  const config = await checkLoggedIn();
   const repoConfig = await checkRepoInitialized();
   if (!repoConfig) return;
 
@@ -86,9 +82,13 @@ const pullRepo = async () => {
     console.log("Connecting to server to pull repository...");
     // 2. Request the zipped commits from your server as an arraybuffer
     const response = await axios({
-      params: { username:username,
-        reponame:reponame
-       }, 
+      params: { 
+        username: username,
+        reponame: reponame,
+      }, 
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+      },
       method: 'get',
       url: SERVER_URL,
       responseType: 'arraybuffer', 

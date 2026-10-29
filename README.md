@@ -13,7 +13,7 @@ A custom version-control CLI (`snapkeep`) built in TypeScript/Node.js. It mirror
 | Router | [yargs](https://github.com/yargs/yargs) |
 | Local store | `.snapkeep/` in the current working directory |
 | Global auth config | `~/.snapkeep/config.json` |
-| Remote server | `http://localhost:3000` (Express + MongoDB + S3 — server code lives outside this repo) |
+| Remote server | `http://localhost:3000` (Express + Supabase + S3 — server code lives outside this repo) |
 
 ---
 
@@ -81,7 +81,7 @@ npm install -g .       # links `snapkeep` globally
 **Purpose:** Create a new local repository in the current directory.
 
 **Flow:**
-1. Call `checkLoggedIn()` — warn if not logged in.
+1. Call `checkLoggedIn()` — halts if not logged in.
 2. Create `.snapkeep/` and `.snapkeep/commits/`.
 3. Write `.snapkeep/config.json` with `name` = basename of `process.cwd()`.
 
@@ -99,11 +99,11 @@ npm install -g .       # links `snapkeep` globally
 1. `checkLoggedIn()`.
 2. Resolve `.` → `process.cwd()`.
 3. Read `.snapkeepignore`; always ignore `.snapkeep` and `.snapkeepignore`.
-4. Copy to `.snapkeep/staging/<basename>`:
+4. Copy to `.snapkeep/staging/<relativePath>`:
    - **File:** `fs.copyFile`
    - **Directory:** `fs.cp` recursive with filter excluding ignored names
 
-**Note:** Staging is a flat copy by basename — adding two paths with the same name overwrites.
+**Note:** Staging preserves paths relative to the repository root to prevent collisions and retain directory hierarchy.
 
 ---
 
@@ -190,7 +190,7 @@ npm install -g .       # links `snapkeep` globally
 |--------|------|
 | `globalConfig.ts` | Read/write `~/.snapkeep/config.json` |
 | `readConfig.json.ts` | Read `.snapkeep/config.json`; errors if repo not initialized |
-| `checkloggedin.ts` | Reads global config; logs error if missing (does not halt execution) |
+| `checkloggedin.ts` | Reads global config; logs error and halts execution if missing |
 
 ---
 
@@ -203,7 +203,7 @@ npm install -g .       # links `snapkeep` globally
 | jszip | Push (compress) / Pull (decompress) |
 | axios, form-data | HTTP push/pull |
 | dotenv | Env loading |
-| aws-sdk, mongoose, express, bcryptjs, jwt | Server-side (declared; server not in this repo) |
+| aws-sdk, supabase, express, jwt | Server-side (declared; server not in this repo) |
 
 ---
 
@@ -218,7 +218,7 @@ The CLI expects a running server at `localhost:3000`:
 | `/push` | POST | Multipart upload → S3 `username/reponame/commitId` |
 | `/pull` | GET | Returns ZIP of all commits for user/repo |
 
-Auth uses JWT tokens stored client-side. Push/pull use username + reponame (not the token in current client code).
+Auth uses Supabase Auth (JWT tokens stored client-side). Push/pull use username + reponame (not the token in current client code).
 
 ---
 
@@ -243,7 +243,7 @@ flowchart TB
         AUTH["/auth/login · /auth/register"]
         PUSH_EP["/push"]
         PULL_EP["/pull"]
-        DB[(MongoDB — users)]
+        DB[(Supabase — users / auth)]
         S3[(AWS S3 — username/reponame/commitId)]
     end
 
@@ -293,10 +293,10 @@ flowchart LR
 | Command | Auth required | Modifies workspace | Needs init |
 |---------|--------------|-------------------|------------|
 | `login` | — | — | — |
-| `init` | soft check | creates `.snapkeep` | — |
-| `add <files>` | soft check | no (staging only) | yes |
-| `commit <message>` | soft check | clears staging | yes |
+| `init` | yes | creates `.snapkeep` | — |
+| `add <files>` | yes | no (staging only) | yes |
+| `commit <message>` | yes | clears staging | yes |
 | `logs` | no | no | yes |
-| `revert <commitID>` | soft check | yes (overwrite) | yes |
+| `revert <commitID>` | yes | yes (overwrite) | yes |
 | `push` | yes | no | yes |
 | `pull` | yes | yes (overwrite) | yes |

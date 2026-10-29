@@ -8,7 +8,7 @@ const copyFile = promisify(fs.copyFile);
 
 
 const revert = async(commitID:string)=>{
-    checkLoggedIn();
+    await checkLoggedIn();
     if (!(await checkRepoInitialized())) return;
       const repoPath = path.resolve(process.cwd(),'.snapkeep');
      const commitsPath = path.join(repoPath,'commits');

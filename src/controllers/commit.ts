@@ -31,7 +31,7 @@ async function hasStagedFiles(dir: string): Promise<boolean> {
 }
 
 const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
-    checkLoggedIn();
+    await checkLoggedIn();
     if (!(await checkRepoInitialized())) return;
     const message = argv.message;
 

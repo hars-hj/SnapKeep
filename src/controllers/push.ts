@@ -3,7 +3,7 @@ import path from "path";
 import axios from "axios";
 import FormData from "form-data";
 import JSZip from "jszip"; 
-import {readGlobalConfig} from "../utils/globalConfig.js";
+import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
  
 
@@ -34,11 +34,7 @@ const pushRepo = async () => {
   const repoPath = path.resolve(process.cwd(), ".snapkeep");
   const commitsPath = path.join(repoPath, "commits");
 
-  const config = await readGlobalConfig();
-  if (!config) {
-    console.error("User not logged in. Please login first.");
-    return;
-  }
+  const config = await checkLoggedIn();
   const repoConfig = await checkRepoInitialized();
   if (!repoConfig) return;
 
@@ -85,7 +81,10 @@ const pushRepo = async () => {
       });
 
       await axios.post(`${server_url}/push`, form, {
-        headers: form.getHeaders(),
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${config.token}`,
+        },
       });
 
       console.log(`pushed commit zip: ${commitDir}`);
