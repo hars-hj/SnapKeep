@@ -1,140 +1,167 @@
-import { promises as fs } from "fs";
-import path from 'path';
-import axios from 'axios';
-import JSZip from 'jszip';
+import axios from "axios";
 import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
-
-const SERVER_URL = "http://localhost:3000/pull"; 
-
-
-
-const enforcePull = async (
-  commitID: string,
-  username: string,
-  reponame: string
-) => {
-  const repoPath = path.resolve(process.cwd(), ".snapkeep");
-  const commitDir = path.join(repoPath, username, reponame, commitID);
-  const parentDir = path.resolve(repoPath, "..");
-
-  try {
-    await fs.cp(commitDir, parentDir, {
-      recursive: true,
-      force: true,
-      filter: (src) => path.basename(src) !== "commit.json",
-    });
-  } catch (err) {
-    console.error("Unable to pull changes: ", err);
-  }
-};
-
-async function getLatestCommitId(
-  username: string,
-  reponame: string
-): Promise<string | null> {
-  const commitsDir = path.join(process.cwd(), ".snapkeep", username, reponame);
-
-  let entries;
-  try {
-    entries = await fs.readdir(commitsDir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
-  let latestId: string | null = null;
-  let latestTime = 0;
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    try {
-      const raw = await fs.readFile(
-        path.join(commitsDir, entry.name, "commit.json"),
-        "utf-8"
-      );
-      const { date } = JSON.parse(raw);
-      const time = new Date(date).getTime();
-
-      if (time > latestTime) {
-        latestTime = time;
-        latestId = entry.name;
-      }
-    } catch {
-      // skip commits without valid commit.json
-    }
-  }
-
-  return latestId;
-}
+import {
+  CommitObject,
+  getHead,
+  hasCommit,
+  hashBuffer,
+  hashCommit,
+  listLocalBlobs,
+  listLocalCommits,
+  readCommit,
+  writeBlob,
+  writeCommit,
+} from "../utils/cas.js";
+import { checkoutCommit } from "./revert.js";
 
 const pullRepo = async () => {
-  const repoPath = path.resolve(process.cwd(), '.snapkeep');
-
   const config = await checkLoggedIn();
   const repoConfig = await checkRepoInitialized();
   if (!repoConfig) return;
 
   const username = config.username;
+  const token = config.token;
   const reponame = repoConfig.name;
+  const serverUrl = config.serverUrl || "http://localhost:3000";
 
   try {
-    console.log("Connecting to server to pull repository...");
-    // 2. Request the zipped commits from your server as an arraybuffer
-    const response = await axios({
-      params: { 
-        username: username,
-        reponame: reponame,
-      }, 
-      headers: {
-        Authorization: `Bearer ${config.token}`,
+    const knownCommits = await listLocalCommits();
+    const knownBlobs = await listLocalBlobs();
+
+    // Step 1 — Negotiate
+    const negotiateRes = await axios.post(
+      `${serverUrl}/pull/negotiate`,
+      {
+        username,
+        reponame,
+        knownCommits,
+        knownBlobs,
       },
-      method: 'get',
-      url: SERVER_URL,
-      responseType: 'arraybuffer', 
-    });
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-    console.log("Download complete. Extracting repository data...");
+    const { remoteHead, commits, missingBlobs } = negotiateRes.data;
 
-    // 3. Load the zip file data into JSZip
-    const zip = new JSZip();
-    const loadedZip = await zip.loadAsync(response.data);
+    // Fast-forward safety check on client
+    const localHead = await getHead();
 
-    // 4. Iterate over every file and folder inside the zip file
-    for (const [relativePath, file] of Object.entries(loadedZip.files)) {
-      // Handle both paths relative to repo root (commitId/...) and legacy full S3 keys (username/reponame/commitId/...)
-      const prefix = `${username}/${reponame}/`;
-      const cleanRelPath = relativePath.startsWith(prefix)
-        ? relativePath.slice(prefix.length)
-        : relativePath;
+    if (!remoteHead) {
+      console.log("Already up-to-date.");
+      return;
+    }
 
-      const mirrorPath = path.join(repoPath, username, reponame, cleanRelPath);
-      const commitsPath = path.join(repoPath, "commits", cleanRelPath);
+    if (localHead === remoteHead) {
+      console.log("Already up-to-date.");
+      return;
+    }
 
-      if (file.dir) {
-        // If it's a directory structure, recreate it locally
-        await fs.mkdir(mirrorPath, { recursive: true });
-        await fs.mkdir(commitsPath, { recursive: true });
-      } else {
-        // Ensure the parent directory for the file exists before writing
-        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
-        await fs.mkdir(path.dirname(commitsPath), { recursive: true });
-        
-        // Get the file content as a Node.js Buffer and write it
-        const contentBuffer = await file.async('nodebuffer');
-        await fs.writeFile(mirrorPath, contentBuffer);
-        await fs.writeFile(commitsPath, contentBuffer);
+    // Index received commits for lookup
+    const commitsMap = new Map<string, CommitObject>();
+    const commitEntries: [string, CommitObject][] = Array.isArray(commits)
+      ? commits.map((c: any) => [c.hash || hashCommit(c), c])
+      : Object.entries(commits || {});
+
+    for (const [hash, commitObj] of commitEntries) {
+      commitsMap.set(hash, commitObj);
+    }
+
+    // Verify fast-forward safety: localHead is null or in ancestry of remoteHead
+    if (localHead !== null) {
+      let isAncestor = false;
+      let curr: string | null = remoteHead;
+      const visited = new Set<string>();
+
+      while (curr !== null) {
+        if (curr === localHead) {
+          isAncestor = true;
+          break;
+        }
+        if (visited.has(curr)) {
+          break;
+        }
+        visited.add(curr);
+
+        if (commitsMap.has(curr)) {
+          curr = commitsMap.get(curr)!.parent;
+        } else if (await hasCommit(curr)) {
+          const c = await readCommit(curr);
+          curr = c.parent;
+        } else {
+          break;
+        }
+      }
+
+      if (!isAncestor) {
+        console.error("Pull aborted: local unpushed commits diverge from remote HEAD.");
+        return;
       }
     }
 
-    const latestCommitId = await getLatestCommitId(username, reponame);
-    if (latestCommitId) {
-      await enforcePull(latestCommitId, username, reponame);
+    // Step 2 — Fetch Missing Blobs & Persist
+    if (missingBlobs && missingBlobs.length > 0) {
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < missingBlobs.length; i += BATCH_SIZE) {
+        const batch = missingBlobs.slice(i, i + BATCH_SIZE);
+        const fetchRes = await axios.post(
+          `${serverUrl}/pull/fetch`,
+          {
+            username,
+            reponame,
+            blobs: batch,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          }
+        );
+
+        const fetchedBlobs = fetchRes.data.blobs || fetchRes.data;
+        const blobEntries: [string, string][] = Array.isArray(fetchedBlobs)
+          ? fetchedBlobs.map((b: any) => [b.hash, b.data || b.content || b.base64])
+          : Object.entries(fetchedBlobs || {});
+
+        for (const [blobHash, base64Data] of blobEntries) {
+          const buf = Buffer.from(base64Data, "base64");
+          const actualHash = hashBuffer(buf);
+          if (actualHash !== blobHash.toLowerCase()) {
+            throw new Error(
+              `Blob integrity check failed during pull for ${blobHash}: computed ${actualHash}`
+            );
+          }
+          await writeBlob(buf);
+        }
+      }
     }
 
-    console.log("All commits pulled and extracted successfully.");
+    // Persist received commits
+    for (const [commitHash, commitObj] of commitEntries) {
+      const actualHash = hashCommit(commitObj);
+      if (actualHash !== commitHash.toLowerCase()) {
+        throw new Error(
+          `Commit integrity check failed during pull for ${commitHash}: computed ${actualHash}`
+        );
+      }
+      await writeCommit(commitObj);
+    }
+
+    // Step 3 — Checkout remoteHead to Workspace
+    await checkoutCommit(remoteHead);
+    console.log(`Pulled latest changes. HEAD is now at ${remoteHead}`);
   } catch (err: any) {
-    console.error("Error pulling from server:", err.message || err);
+    console.error(
+      "Error pulling from server:",
+      err.response?.data?.message || err.message || err
+    );
   }
 };
 

@@ -1,101 +1,141 @@
-import { promises as fs } from "fs";
-import path from "path";
 import axios from "axios";
-import FormData from "form-data";
-import JSZip from "jszip"; 
 import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
- 
-
-
-async function collectFiles(
-  dir: string,
-  baseDir: string
-): Promise<{ filePath: string; fullPath: string }[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const files: { filePath: string; fullPath: string }[] = [];
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    const relativePath = path.relative(baseDir, fullPath);
-
-    if (entry.isDirectory()) {
-      const nested = await collectFiles(fullPath, baseDir);
-      files.push(...nested);
-    } else {
-      files.push({ filePath: relativePath, fullPath });
-    }
-  }
-
-  return files;
-}
+import {
+  CommitObject,
+  getHead,
+  listLocalCommits,
+  readBlob,
+  readCommit,
+} from "../utils/cas.js";
 
 const pushRepo = async () => {
-  const repoPath = path.resolve(process.cwd(), ".snapkeep");
-  const commitsPath = path.join(repoPath, "commits");
-
   const config = await checkLoggedIn();
   const repoConfig = await checkRepoInitialized();
   if (!repoConfig) return;
 
   const username = config.username;
+  const token = config.token;
   const reponame = repoConfig.name;
-  
-  const server_url = config.serverUrl ||  "http://localhost:3000";
-  
+  const serverUrl = config.serverUrl || "http://localhost:3000";
+
+  const clientHead = await getHead();
+  if (!clientHead) {
+    console.log("Nothing to push (no commits yet).");
+    return;
+  }
+
   try {
-    const pushedPath = path.join(repoPath, "pushed.json");
-    let pushedCommits: string[] = [];
-    try {
-      const raw = await fs.readFile(pushedPath, "utf-8");
-      pushedCommits = JSON.parse(raw);
-    } catch {
-      pushedCommits = [];
-    }
-
-    // This dynamically reads all your folder names as commit IDs
-    const commitDirs = await fs.readdir(commitsPath);
-
-    for (const commitDir of commitDirs) {
-      if (pushedCommits.includes(commitDir)) continue;
-
-      const commitPath = path.join(commitsPath, commitDir);
-      const files = await collectFiles(commitPath, commitPath);
-      const zip = new JSZip();
-
-      for (const { filePath, fullPath } of files) {
-        const content = await fs.readFile(fullPath);
-        const normalizedPath = filePath.replace(/\\/g, "/");
-        zip.file(normalizedPath, content);
+    const commits = await listLocalCommits();
+    const blobSet = new Set<string>();
+    for (const commitHash of commits) {
+      const commitObj = await readCommit(commitHash);
+      for (const blobHash of Object.values(commitObj.tree)) {
+        blobSet.add(blobHash);
       }
+    }
+    const blobs = Array.from(blobSet);
 
-      const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-      const form = new FormData();
-      form.append("username", username);
-      form.append("reponame",reponame)
-      form.append("commitId", commitDir); // The folder name acts as the ID
-
-      form.append("file", zipBuffer, {
-        filename: `${commitDir}.zip`,
-        contentType: "application/zip",
-      });
-
-      await axios.post(`${server_url}/push`, form, {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${config.token}`,
+    // Step 1 — Negotiate
+    let negotiateRes;
+    try {
+      negotiateRes = await axios.post(
+        `${serverUrl}/push/negotiate`,
+        {
+          username,
+          reponame,
+          clientHead,
+          commits,
+          blobs,
         },
-      });
-
-      console.log(`pushed commit zip: ${commitDir}`);
-
-      pushedCommits.push(commitDir);
-      await fs.writeFile(pushedPath, JSON.stringify(pushedCommits, null, 2));
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    } catch (err: any) {
+      if (err.response && err.response.status === 409) {
+        const msg =
+          err.response.data?.message ||
+          err.response.data?.error ||
+          "Push rejected: non-fast-forward. Pull latest changes first.";
+        console.error(msg);
+        return;
+      }
+      throw err;
     }
 
-    console.log("all commits pushed to server");
-  } catch (err) {
-    console.error("Error pushing to server: ", err);
+    const { remoteHead, missingCommits, missingBlobs } = negotiateRes.data;
+
+    if (
+      remoteHead === clientHead &&
+      (!missingCommits || missingCommits.length === 0) &&
+      (!missingBlobs || missingBlobs.length === 0)
+    ) {
+      console.log("Everything up-to-date.");
+      return;
+    }
+
+    // Step 2 — Upload Missing Objects
+    const commitsPayload: Record<string, CommitObject> = {};
+    if (missingCommits && Array.isArray(missingCommits)) {
+      for (const hash of missingCommits) {
+        commitsPayload[hash] = await readCommit(hash);
+      }
+    }
+
+    const blobsPayload: Record<string, string> = {};
+    if (missingBlobs && Array.isArray(missingBlobs)) {
+      for (const hash of missingBlobs) {
+        const buf = await readBlob(hash);
+        blobsPayload[hash] = buf.toString("base64");
+      }
+    }
+
+    try {
+      await axios.post(
+        `${serverUrl}/push/upload`,
+        {
+          username,
+          reponame,
+          expectedRemoteHead: remoteHead,
+          newHead: clientHead,
+          commits: commitsPayload,
+          blobs: blobsPayload,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        }
+      );
+    } catch (err: any) {
+      if (err.response && err.response.status === 409) {
+        const msg =
+          err.response.data?.message ||
+          err.response.data?.error ||
+          "Push rejected: non-fast-forward. Pull latest changes first.";
+        console.error(msg);
+        return;
+      }
+      throw err;
+    }
+
+    const commitsCount = missingCommits ? missingCommits.length : 0;
+    const blobsCount = missingBlobs ? missingBlobs.length : 0;
+    console.log(
+      `Push successful: HEAD -> ${clientHead} (${commitsCount} commits, ${blobsCount} blobs uploaded)`
+    );
+  } catch (err: any) {
+    console.error(
+      "Error pushing to server:",
+      err.response?.data?.message || err.message || err
+    );
   }
 };
 

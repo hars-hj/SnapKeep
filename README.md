@@ -50,7 +50,6 @@ npm install -g .       # links `snapkeep` globally
 │   │       └── <62-char>  # content-addressable raw blob content
 │   ├── commits/
 │   │   └── <sha256>.json # { tree, parent, message, date }
-│   ├── pushed.json       # array of commit IDs already pushed
 │   └── <username>/       # populated after pull (remote mirror)
 └── (working files)
 ```
@@ -152,36 +151,31 @@ npm install -g .       # links `snapkeep` globally
 
 ### 4.7 `snapkeep push`
 
-**Purpose:** Upload unpushed commits to the remote server.
+**Purpose:** Synchronize unpushed local commits and blobs to the remote server via hash negotiation.
 
 **Flow:**
-1. Read global config (username, serverUrl); exit if not logged in.
-2. Read repo config for `reponame`.
-3. Load `.snapkeep/pushed.json` (array of already-pushed commit IDs).
-4. For each folder in `.snapkeep/commits/` not in `pushed.json`:
-   - Recursively collect all files in the commit folder.
-   - Build in-memory ZIP via JSZip (paths normalized to `/`).
-   - `POST /push` as multipart/form-data: `username`, `reponame`, `commitId`, `file` (zip buffer).
-   - Append commit ID to `pushed.json` on success.
+1. Read global config (`username`, `token`, `serverUrl`) and repo config (`reponame`); halt if not logged in.
+2. Read `clientHead` from `.snapkeep/HEAD`. Exit if no commits yet.
+3. Collect commit hashes via `listLocalCommits()` and the union of referenced `blobs` across their trees.
+4. **Negotiate:** `POST /push/negotiate` with `{ username, reponame, clientHead, commits, blobs }` (Bearer token authenticated). Handles 409 Conflict if non-fast-forward.
+5. If `remoteHead === clientHead` and no missing objects, exit ("Everything up-to-date.").
+6. **Upload:** `POST /push/upload` sending only `missingCommits` (as JSON `CommitObject`s) and `missingBlobs` (base64-encoded).
 
-**Remote storage:** S3 key pattern `username/reponame/commitId`.
+**Auth & Transport:** JSON over HTTP with `Authorization: Bearer <token>`.
 
 ---
 
 ### 4.8 `snapkeep pull`
 
-**Purpose:** Download remote commits and restore workspace.
+**Purpose:** Download missing remote commits and blobs via negotiation and update workspace.
 
 **Flow:**
-1. Read global + repo config; exit if not logged in.
-2. `GET /pull?username=&reponame=` — receive ZIP as arraybuffer.
-3. Extract every entry from ZIP into `.snapkeep/` (preserving path structure).
-4. Parse commit IDs from ZIP paths (`username/reponame/<commitId>/...`).
-5. For each commit ID, call `enforcePull`:
-   - Locate commit at `.snapkeep/<username>/<reponame>/<commitId>/`.
-   - Copy to project root (same revert logic — excludes `commit.json`).
-
-**Effect:** Syncs local `.snapkeep` mirror and restores latest pulled commit state to workspace.
+1. Read global config and repo config; halt if not logged in.
+2. Collect `knownCommits` and `knownBlobs` from local CAS.
+3. **Negotiate:** `POST /pull/negotiate` with `{ username, reponame, knownCommits, knownBlobs }`.
+4. **Fast-forward check:** Verify local `HEAD` is an ancestor of `remoteHead`. If diverged, abort with error to protect unpushed local changes.
+5. **Fetch:** If `missingBlobs` exist, `POST /pull/fetch` (batched in chunks of 50). Decode base64, verify SHA-256 integrity, and write to `.snapkeep/objects/`. Persist received commits to `.snapkeep/commits/`.
+6. **Checkout:** Restore workspace to `remoteHead`, delete removed tracked files, update `index.json`, and update `HEAD`.
 
 ---
 
@@ -201,8 +195,7 @@ npm install -g .       # links `snapkeep` globally
 |---------|---------|
 | yargs | CLI routing |
 | uuid | Commit ID generation |
-| jszip | Push (compress) / Pull (decompress) |
-| axios, form-data | HTTP push/pull |
+| axios | HTTP API & CAS sync (push/pull) |
 | dotenv | Env loading |
 | aws-sdk, supabase, express, jwt | Server-side (declared; server not in this repo) |
 
@@ -216,10 +209,12 @@ The CLI expects a running server at `localhost:3000`:
 |----------|--------|---------|
 | `/auth/login` | POST | `{ username, password }` → token |
 | `/auth/register` | POST | Auto-create account on first login |
-| `/push` | POST | Multipart upload → S3 `username/reponame/commitId` |
-| `/pull` | GET | Returns ZIP of all commits for user/repo |
+| `/push/negotiate` | POST | Hash negotiation for missing commits/blobs |
+| `/push/upload` | POST | Upload missing commits & base64 blobs |
+| `/pull/negotiate` | POST | Negotiate missing commits/blobs from remote |
+| `/pull/fetch` | POST | Batch fetch missing blobs (base64) |
 
-Auth uses Supabase Auth (JWT tokens stored client-side). Push/pull use username + reponame (not the token in current client code).
+Auth uses Supabase Auth with `Authorization: Bearer <token>` attached to all push/pull synchronization endpoints.
 
 ---
 
@@ -234,9 +229,9 @@ flowchart TB
         subgraph Local["Local Storage"]
             GC["~/.snapkeep/config.json"]
             MG[".snapkeep/"]
-            STG[staging/]
-            COM[commits/uuid/]
-            PUSH[pushed.json]
+            IDX[index.json]
+            OBJ[objects/fanout/]
+            COM[commits/sha256/]
         end
     end
 
@@ -258,15 +253,15 @@ flowchart TB
     commit --> COM
     revert -->|fs.cp force| WD[Working Directory]
 
-    CLI -->|push| PUSH_EP
+    CLI -->|push (negotiate & upload)| PUSH_EP
+    OBJ --> PUSH_EP
     COM --> PUSH_EP
-    PUSH --> PUSH_EP
     PUSH_EP --> S3
 
-    CLI -->|pull| PULL_EP
+    CLI -->|pull (negotiate & fetch)| PULL_EP
     PULL_EP --> S3
-    PULL_EP -->|ZIP stream| MG
-    MG -->|enforcePull| WD
+    PULL_EP -->|CAS objects| OBJ
+    CLI -->|checkoutCommit| WD
 
     AUTH --> DB
 ```
