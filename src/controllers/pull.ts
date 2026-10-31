@@ -102,18 +102,28 @@ const pullRepo = async () => {
 
     // 4. Iterate over every file and folder inside the zip file
     for (const [relativePath, file] of Object.entries(loadedZip.files)) {
-      const absolutePath = path.join(repoPath, relativePath);
+      // Handle both paths relative to repo root (commitId/...) and legacy full S3 keys (username/reponame/commitId/...)
+      const prefix = `${username}/${reponame}/`;
+      const cleanRelPath = relativePath.startsWith(prefix)
+        ? relativePath.slice(prefix.length)
+        : relativePath;
+
+      const mirrorPath = path.join(repoPath, username, reponame, cleanRelPath);
+      const commitsPath = path.join(repoPath, "commits", cleanRelPath);
 
       if (file.dir) {
         // If it's a directory structure, recreate it locally
-        await fs.mkdir(absolutePath, { recursive: true });
+        await fs.mkdir(mirrorPath, { recursive: true });
+        await fs.mkdir(commitsPath, { recursive: true });
       } else {
         // Ensure the parent directory for the file exists before writing
-        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
+        await fs.mkdir(path.dirname(commitsPath), { recursive: true });
         
         // Get the file content as a Node.js Buffer and write it
         const contentBuffer = await file.async('nodebuffer');
-        await fs.writeFile(absolutePath, contentBuffer);
+        await fs.writeFile(mirrorPath, contentBuffer);
+        await fs.writeFile(commitsPath, contentBuffer);
       }
     }
 

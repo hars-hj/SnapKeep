@@ -1,92 +1,70 @@
-import { promises as fs } from "fs";
-import path from "path";
-import { v4 as uuidv4 } from "uuid";
 import type { ArgumentsCamelCase } from "yargs";
 import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
+import {
+  CommitObject,
+  getHead,
+  getIndex,
+  readCommit,
+  serializeCommit,
+  setHead,
+  writeCommit,
+} from "../utils/cas.js";
+
 type AddArgs = {
-    message: string;
+  message: string;
 };
 
-async function hasStagedFiles(dir: string): Promise<boolean> {
-    let entries;
-    try {
-        entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch (err: any) {
-        if (err.code === "ENOENT") return false;
-        throw err;
-    }
-
-    for (const entry of entries) {
-        if (entry.isFile()) return true;
-        if (
-            entry.isDirectory() &&
-            (await hasStagedFiles(path.join(dir, entry.name)))
-        ) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 const commitRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
-    await checkLoggedIn();
-    if (!(await checkRepoInitialized())) return;
-    const message = argv.message;
+  await checkLoggedIn();
+  if (!(await checkRepoInitialized())) return;
 
-    const repoPath = path.resolve(process.cwd(), ".snapkeep");
-    const stagedPath = path.join(repoPath, "staging");
-    const commitPath = path.join(repoPath, "commits");
+  const index = await getIndex();
+  if (Object.keys(index).length === 0) {
+    console.error("Nothing to commit. Stage files with 'snapkeep add' first.");
+    return;
+  }
 
-    if (!(await hasStagedFiles(stagedPath))) {
-        console.error(
-            "Nothing to commit. Stage files with 'snapkeep add' first."
-        );
-        return;
+  const parent = await getHead();
+
+  if (parent !== null) {
+    const parentCommit = await readCommit(parent);
+    const indexCanonical = serializeCommit({
+      tree: index,
+      parent: null,
+      message: "",
+      date: "",
+    });
+    const parentCanonical = serializeCommit({
+      tree: parentCommit.tree,
+      parent: null,
+      message: "",
+      date: "",
+    });
+
+    if (indexCanonical === parentCanonical) {
+      console.log("Nothing to commit, working tree clean");
+      return;
     }
+  }
 
-    try {
-        const commitID = uuidv4();
-        const commitDir = path.join(commitPath, commitID);
+  const message = argv.message;
 
-        await fs.mkdir(commitDir, { recursive: true });
+  try {
+    const commitObj: CommitObject = {
+      tree: index,
+      parent,
+      message,
+      date: new Date().toISOString(),
+    };
 
-        // Copy entire staging area recursively
-        await fs.cp(stagedPath, commitDir, {
-            recursive: true
-        });
+    const commitHash = await writeCommit(commitObj);
+    await setHead(commitHash);
 
-        // Store commit metadata
-        await fs.writeFile(
-            path.join(commitDir, "commit.json"),
-            JSON.stringify(
-                {
-                    message,
-                    date: new Date().toISOString()
-                },
-                null,
-                2
-            )
-        );
-
-        // Clear staging area
-        await fs.rm(stagedPath, {
-            recursive: true,
-            force: true
-        });
-
-        // Recreate empty staging directory
-        await fs.mkdir(stagedPath, {
-            recursive: true
-        });
-
-        console.log(
-            `commit ${commitID} created with message "${message}"`
-        );
-    } catch (err) {
-        console.error("error committing files:", err);
-    }
+    console.log(`commit ${commitHash} created with message "${message}"`);
+  } catch (err) {
+    console.error("error committing files:", err);
+  }
 };
 
 export { commitRepo };

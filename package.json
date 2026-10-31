@@ -7,7 +7,7 @@
     "snapkeep": "./dist/server.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node --test dist/test/cas.test.js dist/controllers/controllers.test.js",
     "build": "tsc",
     "dev": "tsx src/server.ts",
     "dev watch": "tsx watch src/server.ts",

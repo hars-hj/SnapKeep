@@ -1,36 +1,82 @@
-import path from 'path';
+import path from "path";
 import { promises as fs } from "fs";
-import {promisify} from 'util';
-import { checkLoggedIn } from './checkloggedin.js';
+import { checkLoggedIn } from "./checkloggedin.js";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
-const readdir = promisify(fs.readdir);
-const copyFile = promisify(fs.copyFile);
+import {
+  getHead,
+  getIndex,
+  hasCommit,
+  readBlob,
+  readCommit,
+  saveIndex,
+  setHead,
+} from "../utils/cas.js";
 
+const revert = async (commitID: string) => {
+  await checkLoggedIn();
+  if (!(await checkRepoInitialized())) return;
 
-const revert = async(commitID:string)=>{
-    await checkLoggedIn();
-    if (!(await checkRepoInitialized())) return;
-      const repoPath = path.resolve(process.cwd(),'.snapkeep');
-     const commitsPath = path.join(repoPath,'commits');
+  try {
+    if (!(await hasCommit(commitID))) {
+      throw new Error(`Commit '${commitID}' does not exist.`);
+    }
 
-    
-     try {
-      const commitDir = path.join(commitsPath, commitID);
-      const parentDir = path.resolve(repoPath, "..");
+    const targetCommit = await readCommit(commitID);
 
-      await fs.cp(commitDir, parentDir, {
-          recursive: true,
-          force: true,
-          filter: (src:any) =>
-              path.basename(src) !== "commit.json"
-      });
+    // Read current HEAD commit (if any) and current index to identify tracked files
+    const head = await getHead();
+    const trackedFiles = new Set<string>();
 
-      console.log(
-          `commit with commitId: ${commitID} reverted`
-      );
-  }catch(err){
-        console.error("Unable to revert commit: ",err);
-     }
-}
+    const currentIndex = await getIndex();
+    for (const file of Object.keys(currentIndex)) {
+      trackedFiles.add(file);
+    }
 
-export {revert};
+    if (head) {
+      try {
+        const headCommit = await readCommit(head);
+        for (const file of Object.keys(headCommit.tree)) {
+          trackedFiles.add(file);
+        }
+      } catch {
+        // proceed with index if head commit is inaccessible
+      }
+    }
+
+    const repoRoot = process.cwd();
+
+    // Delete any tracked workspace files that are NOT in targetCommit.tree
+    for (const relPath of trackedFiles) {
+      if (!Object.prototype.hasOwnProperty.call(targetCommit.tree, relPath)) {
+        if (relPath.startsWith(".snapkeep") || relPath === ".snapkeepignore") {
+          continue;
+        }
+
+        const fullPath = path.join(repoRoot, relPath);
+        try {
+          await fs.rm(fullPath, { force: true });
+        } catch {
+          // ignore if already deleted
+        }
+      }
+    }
+
+    // Restore files from targetCommit.tree
+    for (const [relPath, blobHash] of Object.entries(targetCommit.tree)) {
+      const buf = await readBlob(blobHash);
+      const destPath = path.join(repoRoot, relPath);
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      await fs.writeFile(destPath, buf);
+    }
+
+    // Update .snapkeep/index.json and .snapkeep/HEAD
+    await saveIndex(targetCommit.tree);
+    await setHead(commitID);
+
+    console.log(`commit with commitId: ${commitID} reverted`);
+  } catch (err: any) {
+    console.error("Unable to revert commit: ", err.message || err);
+  }
+};
+
+export { revert };

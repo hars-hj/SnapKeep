@@ -1,42 +1,29 @@
-import { promises as fs } from "fs";
-import path from "path";
-import type { ArgumentsCamelCase } from "yargs";
 import { checkRepoInitialized } from "./checkrepoinitialized.js";
+import { getHead, readCommit } from "../utils/cas.js";
 
+export const getLogs = async () => {
+  if (!(await checkRepoInitialized())) return;
 
-export const getLogs = async()=>{
-    if (!(await checkRepoInitialized())) return;
-    const repoPath = path.resolve(process.cwd(),".snapkeep");
-    const commitsPath = path.join(repoPath,"commits");
+  let curr = await getHead();
+  if (!curr) {
+    console.log("No commits yet.");
+    return;
+  }
 
-    const commits = await fs.readdir(commitsPath);
-    const logs = [];
-    
-    for(const commit of commits){
-        const commitpath = path.join(commitsPath,commit);
-        const commitjson = path.join(commitpath,"commit.json");
+  const visited = new Set<string>();
 
-        const commitdata = await fs.readFile(commitjson,"utf-8");
-        const commitdatajson = JSON.parse(commitdata);
-       // const date = new Date(commitdatajson.date);
-        logs.push({
-            commitId:commit,
-            message:commitdatajson.message,
-            date:commitdatajson.date
-        })
+  while (curr !== null) {
+    if (visited.has(curr)) {
+      break;
     }
+    visited.add(curr);
 
-    logs.sort(
-        (a, b) =>
-            new Date(b.date).getTime() -
-            new Date(a.date).getTime()
-    );
+    const commit = await readCommit(curr);
+    console.log(`Commit: ${curr}`);
+    console.log(`Parent: ${commit.parent ?? "None"}`);
+    console.log(`Date: ${commit.date}`);
+    console.log(`Message: ${commit.message}\n`);
 
-    for(const log of logs){
-        const date = new Date(log.date);
-        date.toLocaleDateString();
-         console.log(`commitId: ${log.commitId}  message: ${log.message}   Date: ${date}`);
-    }
-
-}
-
+    curr = commit.parent;
+  }
+};

@@ -43,11 +43,13 @@ npm install -g .       # links `snapkeep` globally
 ├── .snapkeepignore       # ignore rules for `add`
 ├── .snapkeep/
 │   ├── config.json       # { "name": "<folder-name>" }
-│   ├── staging/          # files awaiting commit
+│   ├── HEAD              # commit hash of current HEAD
+│   ├── index.json        # staged tree mapping (relative path -> blob hash)
+│   ├── objects/
+│   │   └── <2-char>/
+│   │       └── <62-char>  # content-addressable raw blob content
 │   ├── commits/
-│   │   └── <uuid>/
-│   │       ├── commit.json   # { message, date }
-│   │       └── ...           # snapshotted files
+│   │   └── <sha256>.json # { tree, parent, message, date }
 │   ├── pushed.json       # array of commit IDs already pushed
 │   └── <username>/       # populated after pull (remote mirror)
 └── (working files)
@@ -82,10 +84,11 @@ npm install -g .       # links `snapkeep` globally
 
 **Flow:**
 1. Call `checkLoggedIn()` — halts if not logged in.
-2. Create `.snapkeep/` and `.snapkeep/commits/`.
+2. Create `.snapkeep/`, `.snapkeep/objects/`, and `.snapkeep/commits/`.
+3. Create empty `.snapkeep/HEAD` and `.snapkeep/index.json` ({})
 3. Write `.snapkeep/config.json` with `name` = basename of `process.cwd()`.
 
-**Does not** create `.snapkeepignore` or `staging/` (staging is created on first `add` or `commit`).
+**Does not** create a `staging/` folder (all staged content is tracked in `index.json` and `objects/`).
 
 ---
 
@@ -99,11 +102,10 @@ npm install -g .       # links `snapkeep` globally
 1. `checkLoggedIn()`.
 2. Resolve `.` → `process.cwd()`.
 3. Read `.snapkeepignore`; always ignore `.snapkeep` and `.snapkeepignore`.
-4. Copy to `.snapkeep/staging/<relativePath>`:
-   - **File:** `fs.copyFile`
-   - **Directory:** `fs.cp` recursive with filter excluding ignored names
+4. Write file content to `.snapkeep/objects/ab/cdef...` as content-addressable blobs.
+5. Update `.snapkeep/index.json` with `posixRelativePath -> blobHash`.
 
-**Note:** Staging preserves paths relative to the repository root to prevent collisions and retain directory hierarchy.
+**Note:** When `.` is passed, deleted working tree files are also removed from `index.json`.
 
 ---
 
@@ -127,10 +129,9 @@ npm install -g .       # links `snapkeep` globally
 **Purpose:** List all local commits, newest first.
 
 **Flow:**
-1. Read all folders in `.snapkeep/commits/`.
-2. Parse each `commit.json`.
-3. Sort by date descending.
-4. Print `commitId`, `message`, and `date` to console.
+1. Read HEAD commit from `.snapkeep/HEAD`.
+2. Traverse the commit chain back via `commit.parent` pointers until null.
+3. Print `Commit`, `Parent`, `Date`, and `Message` for each commit.
 
 **Note:** Does not require login (`checkLoggedIn` not called).
 
@@ -142,10 +143,10 @@ npm install -g .       # links `snapkeep` globally
 
 **Flow:**
 1. `checkLoggedIn()`.
-2. Copy `.snapkeep/commits/<commitID>/` → project root (`../` from `.snapkeep`).
-3. Use `fs.cp` with `force: true`; filter excludes `commit.json` so metadata stays internal.
-
-**Effect:** Destructively overwrites workspace files with the commit snapshot.
+2. Read target commit object from `.snapkeep/commits/<commitID>.json`.
+3. Delete any currently tracked workspace files that are not present in target commit tree.
+4. Restore all files from target commit tree by reading CAS blobs from `.snapkeep/objects/`.
+5. Update `.snapkeep/index.json` and `.snapkeep/HEAD` to the target commit.
 
 ---
 
