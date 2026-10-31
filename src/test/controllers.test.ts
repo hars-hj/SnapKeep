@@ -9,6 +9,7 @@ import { commitRepo } from "../controllers/commit.js";
 import { getLogs } from "../controllers/log.js";
 import { revert } from "../controllers/revert.js";
 import { getHead, getIndex, readCommit } from "../utils/cas.js";
+import { saveGlobalConfig } from "../utils/globalConfig.js";
 
 describe("Phase 2 — Refactored Local Commands", () => {
   let tempDir: string;
@@ -18,6 +19,13 @@ describe("Phase 2 — Refactored Local Commands", () => {
     originalCwd = process.cwd();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "snapkeep-cmd-test-"));
     process.chdir(tempDir);
+
+    await saveGlobalConfig({
+      username: "testuser",
+      userId: "u123",
+      token: "mock-jwt-token",
+      serverUrl: "http://localhost:3000",
+    });
   });
 
   afterEach(async () => {

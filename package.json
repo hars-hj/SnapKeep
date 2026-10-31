@@ -7,7 +7,7 @@
     "snapkeep": "./dist/server.js"
   },
   "scripts": {
-    "test": "npm run build && node --test dist/test/cas.test.js dist/controllers/controllers.test.js dist/test/sync.test.js",
+    "test": "npm run build && node --test dist/test/cas.test.js dist/test/controllers.test.js dist/test/sync.test.js dist/test/tier2.test.js",
     "build": "tsc",
     "dev": "tsx src/server.ts",
     "dev watch": "tsx watch src/server.ts",

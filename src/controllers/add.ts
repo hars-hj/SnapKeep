@@ -11,55 +11,25 @@ import {
   toPosixPath,
   writeBlob,
 } from "../utils/cas.js";
+import { loadIgnoreMatcher } from "../utils/workspace.js";
 
 type AddArgs = {
   files: string;
 };
 
-const defaultIgnored = new Set<string>([
-  ".snapkeep",
-  ".snapkeepignore",
-  "node_modules",
-  ".git",
-]);
-
-const ignoredFiles = new Set<string>();
-
-const getSnapkeepIgnoreFiles = async () => {
-  ignoredFiles.clear();
-  for (const item of defaultIgnored) {
-    ignoredFiles.add(item);
-  }
-
-  try {
-    const content = await fs.readFile(".snapkeepignore", "utf-8");
-    content
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.startsWith("#"))
-      .map((line) => line.replace(/[/\\]+$/, ""))
-      .forEach((line) => ignoredFiles.add(line));
-  } catch (err: any) {
-    if (err.code !== "ENOENT") throw err;
-  }
-};
-
-const isIgnored = (filePath: string): boolean => {
-  const rel = path.relative(process.cwd(), filePath);
-  if (!rel || rel === ".") return false;
-  const normalized = toPosixPath(rel);
-  const parts = normalized.split("/");
-  return parts.some((part) => ignoredFiles.has(part)) || ignoredFiles.has(normalized);
-};
-
-async function collectFiles(dir: string): Promise<string[]> {
+async function collectFiles(
+  dir: string,
+  repoRoot: string,
+  isIgnored: (relPath: string) => boolean
+): Promise<string[]> {
   const results: string[] = [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    if (isIgnored(fullPath)) continue;
+    const rel = toPosixPath(path.relative(repoRoot, fullPath));
+    if (isIgnored(rel)) continue;
     if (entry.isDirectory()) {
-      const subFiles = await collectFiles(fullPath);
+      const subFiles = await collectFiles(fullPath, repoRoot, isIgnored);
       results.push(...subFiles);
     } else if (entry.isFile()) {
       results.push(fullPath);
@@ -72,9 +42,9 @@ const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
   await checkLoggedIn();
   if (!(await checkRepoInitialized())) return;
 
-  await getSnapkeepIgnoreFiles();
-
   const repoRoot = process.cwd();
+  const isIgnored = await loadIgnoreMatcher(repoRoot);
+
   const inputPath = argv.files === "." ? repoRoot : argv.files;
   const sourcePath = path.resolve(repoRoot, inputPath);
   const relativePath = path.relative(repoRoot, sourcePath);
@@ -105,19 +75,19 @@ const addRepo = async (argv: ArgumentsCamelCase<AddArgs>) => {
     }
 
     if (stats.isFile()) {
-      if (isIgnored(sourcePath)) {
+      const posixRel = toPosixPath(relativePath);
+      if (isIgnored(posixRel)) {
         return;
       }
 
       const buffer = await fs.readFile(sourcePath);
       const hash = await writeBlob(buffer);
-      const posixRel = toPosixPath(relativePath);
       index[posixRel] = hash;
 
       await saveIndex(index);
       console.log(`file ${posixRel} added to the staging area`);
     } else if (stats.isDirectory()) {
-      const files = await collectFiles(sourcePath);
+      const files = await collectFiles(sourcePath, repoRoot, isIgnored);
       for (const file of files) {
         const rel = path.relative(repoRoot, file);
         const posixRel = toPosixPath(rel);

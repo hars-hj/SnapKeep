@@ -79,13 +79,16 @@ npm install -g .       # links `snapkeep` globally
 
 ### 4.2 `snapkeep init`
 
-**Purpose:** Create a new local repository in the current directory.
+**Purpose:** Create a new local repository in the current directory, or safely reinitialize an existing one.
 
 **Flow:**
 1. Call `checkLoggedIn()` — halts if not logged in.
-2. Create `.snapkeep/`, `.snapkeep/objects/`, and `.snapkeep/commits/`.
-3. Create empty `.snapkeep/HEAD` and `.snapkeep/index.json` ({})
-3. Write `.snapkeep/config.json` with `name` = basename of `process.cwd()`.
+2. Check if `.snapkeep` already exists:
+   - If already initialized, safely reinitialize: ensures subdirectories exist, preserves existing `HEAD` and `index.json`, and outputs `"Reinitialized existing SnapKeep repository in <path>"`.
+3. If new repo, create `.snapkeep/`, `.snapkeep/objects/`, and `.snapkeep/commits/`.
+4. Create empty `.snapkeep/HEAD` and `.snapkeep/index.json` (`{}`).
+5. Write `.snapkeep/config.json` with `name` = basename of `process.cwd()`.
+6. Create default `.snapkeepignore` (ignoring `node_modules`, `.env`, `dist/`, `build/`, `*.log`, `.DS_Store`) if it does not already exist.
 
 **Does not** create a `staging/` folder (all staged content is tracked in `index.json` and `objects/`).
 
@@ -93,14 +96,14 @@ npm install -g .       # links `snapkeep` globally
 
 ### 4.3 `snapkeep add <files>`
 
-**Purpose:** Copy file(s) or directory into the staging area.
+**Purpose:** Hash file(s) into Content-Addressable Storage and stage them in `index.json`.
 
 **Args:** `<files>` — file path, directory path, or `.` (current directory).
 
 **Flow:**
 1. `checkLoggedIn()`.
 2. Resolve `.` → `process.cwd()`.
-3. Read `.snapkeepignore`; always ignore `.snapkeep` and `.snapkeepignore`.
+3. Read `.snapkeepignore` via `loadIgnoreMatcher()`; always ignores `.snapkeep`, `.snapkeepignore`, `.git`, and `node_modules`.
 4. Write file content to `.snapkeep/objects/ab/cdef...` as content-addressable blobs.
 5. Update `.snapkeep/index.json` with `posixRelativePath -> blobHash`.
 
@@ -110,16 +113,18 @@ npm install -g .       # links `snapkeep` globally
 
 ### 4.4 `snapkeep commit <message>`
 
-**Purpose:** Snapshot staged files into an immutable commit.
+**Purpose:** Snapshot staged files into an immutable, deterministically hashed commit object.
 
 **Flow:**
 1. `checkLoggedIn()`.
-2. Generate UUID commit ID.
-3. Recursively copy `.snapkeep/staging/` → `.snapkeep/commits/<uuid>/`.
-4. Write `commit.json` `{ message, date: ISO timestamp }` inside the commit folder.
-5. Delete and recreate empty `staging/`.
+2. Read current `index.json`. If empty, prints `"Nothing to commit"`.
+3. Read parent commit hash from `.snapkeep/HEAD`.
+4. Check if staged tree is identical to parent commit tree; if so, inform the user `"Nothing to commit, working tree clean"`.
+5. Construct deterministic `CommitObject` (`{ tree, parent, message, date }`).
+6. Compute SHA-256 commit hash and write `.snapkeep/commits/<hash>.json`.
+7. Update `.snapkeep/HEAD` to point to the new commit hash.
 
-**Output:** `commit <uuid> created with message "<message>"`.
+**Output:** `commit <hash> created with message "<message>"`.
 
 ---
 
@@ -136,20 +141,61 @@ npm install -g .       # links `snapkeep` globally
 
 ---
 
-### 4.6 `snapkeep revert <commitID>`
+### 4.6 `snapkeep status`
 
-**Purpose:** Restore the working directory to a past commit's file state.
+**Purpose:** Show the working tree and staging area status compared to HEAD.
 
 **Flow:**
-1. `checkLoggedIn()`.
-2. Read target commit object from `.snapkeep/commits/<commitID>.json`.
-3. Delete any currently tracked workspace files that are not present in target commit tree.
-4. Restore all files from target commit tree by reading CAS blobs from `.snapkeep/objects/`.
-5. Update `.snapkeep/index.json` and `.snapkeep/HEAD` to the target commit.
+1. Check repository is initialized (`checkRepoInitialized`). Does not require login.
+2. Compares HEAD commit tree, `index.json`, and current working tree files (ignoring files via `.snapkeepignore`).
+3. Displays:
+   - Current HEAD commit hash (or `(no commits yet)`).
+   - **Changes to be committed** (green): added, modified, or deleted files staged in `index.json`.
+   - **Changes not staged for commit** (red): tracked files modified or deleted in the working tree.
+   - **Untracked files** (yellow): files in the working tree not tracked in index or HEAD.
+   - Outputs `"nothing to commit, working tree clean"` when no changes exist.
 
 ---
 
-### 4.7 `snapkeep push`
+### 4.7 `snapkeep diff [file]`
+
+**Purpose:** Show unified line-by-line diffs between the working tree and HEAD.
+
+**Args:** `[file]` (optional) — filter diff output to a specific relative file path.
+
+**Flow:**
+1. Check repository is initialized (`checkRepoInitialized`). Does not require login.
+2. Read HEAD commit tree and scan working tree files.
+3. Detect modified, added, or deleted files (optionally filtered by `[file]`).
+4. Performs binary file detection (checks for null bytes `0x00` in first 8000 bytes) and outputs `"Binary files differ"`.
+5. Computes ANSI color-coded unified diff (`--- a/<file>`, `+++ b/<file>`, `@@ -start,count +start,count @@`, `-` red, `+` green) using LCS (Longest Common Subsequence).
+
+---
+
+### 4.8 `snapkeep revert <commitID> [--force] [--snapshot]`
+
+**Purpose:** Safely restore the working directory, index, and HEAD to a past commit.
+
+**Args & Options:**
+- `<commitID>`: 64-character SHA-256 hash or unique prefix (minimum 7 characters).
+- `--force` / `-f`: Discard uncommitted local modifications and untracked file collisions without prompting.
+- `--snapshot` / `-s`: Automatically create a backup snapshot commit of current dirty changes before reverting.
+
+**Flow:**
+1. `checkLoggedIn()`.
+2. Resolve `<commitID>` (supports 7+ character prefix matching; errors if ambiguous or not found).
+3. **Pre-flight Safety Check:**
+   - Detects dirty tracked changes (unstaged/staged modifications) and untracked files that would be overwritten by files in the target commit.
+   - Aborts with error detailing affected files unless `--force` or `--snapshot` is specified.
+4. If `--snapshot` is provided and changes are present, stages all current working tree changes and commits an auto-snapshot commit (`auto-snapshot before revert to <targetHash>`), logging the snapshot hash.
+5. Restores all files in target commit tree from CAS blobs (`.snapkeep/objects/`).
+6. Deletes any currently tracked files that do not exist in the target commit.
+7. Recursively cleans up any empty parent directories left behind by deleted files.
+8. Updates `.snapkeep/index.json` to match target commit tree, and updates `.snapkeep/HEAD` to the target commit.
+
+---
+
+### 4.9 `snapkeep push`
 
 **Purpose:** Synchronize unpushed local commits and blobs to the remote server via hash negotiation.
 
@@ -165,7 +211,7 @@ npm install -g .       # links `snapkeep` globally
 
 ---
 
-### 4.8 `snapkeep pull`
+### 4.10 `snapkeep pull`
 
 **Purpose:** Download missing remote commits and blobs via negotiation and update workspace.
 
@@ -183,6 +229,8 @@ npm install -g .       # links `snapkeep` globally
 
 | Module | Role |
 |--------|------|
+| `cas.ts` | Git-style Content-Addressable Storage (CAS), blob read/write, deterministic commit objects, index & HEAD management |
+| `workspace.ts` | `.snapkeepignore` rule parsing, working tree in-memory hashing, repository status calculation, Myers/LCS unified diffing |
 | `globalConfig.ts` | Read/write `~/.snapkeep/config.json` |
 | `readConfig.json.ts` | Read `.snapkeep/config.json`; errors if repo not initialized |
 | `checkloggedin.ts` | Reads global config; logs error and halts execution if missing |
@@ -194,7 +242,6 @@ npm install -g .       # links `snapkeep` globally
 | Package | Used by |
 |---------|---------|
 | yargs | CLI routing |
-| uuid | Commit ID generation |
 | axios | HTTP API & CAS sync (push/pull) |
 | dotenv | Env loading |
 | aws-sdk, supabase, express, jwt | Server-side (declared; server not in this repo) |
@@ -248,10 +295,11 @@ flowchart TB
     CLI -->|login| AUTH
     AUTH --> GC
 
-    CLI -->|init · add · commit · logs · revert| MG
-    add --> STG
+    CLI -->|init · add · commit · logs · revert · status · diff| MG
+    add --> OBJ
+    add --> IDX
     commit --> COM
-    revert -->|fs.cp force| WD[Working Directory]
+    revert -->|checkoutCommitTree| WD[Working Directory]
 
     CLI -->|push (negotiate & upload)| PUSH_EP
     OBJ --> PUSH_EP
@@ -276,6 +324,8 @@ flowchart LR
     commit --> logs
     commit --> revert
     commit --> push
+    commit --> status
+    commit --> diff
     login --> push
     login --> pull
     init --> push
@@ -292,7 +342,9 @@ flowchart LR
 | `init` | yes | creates `.snapkeep` | — |
 | `add <files>` | yes | no (staging only) | yes |
 | `commit <message>` | yes | clears staging | yes |
+| `status` | no | no | yes |
+| `diff [file]` | no | no | yes |
 | `logs` | no | no | yes |
-| `revert <commitID>` | yes | yes (overwrite) | yes |
+| `revert <commitID>` | yes | yes (safely restores) | yes |
 | `push` | yes | no | yes |
-| `pull` | yes | yes (overwrite) | yes |
+| `pull` | yes | yes (fast-forward) | yes |
